@@ -1,44 +1,69 @@
 # =========================================================================
-# TechEnglish v3.1 R8 / ProGuard Rules (SP1-08 / BUG-11)
-# Covers: Kotlinx Serialization, Room, Hilt/WorkManager, Ktor/OkHttp, Glance
+# TechEnglish v3.1.0 R8 / ProGuard Rules (Production Release)
+# Covers: Kotlinx Serialization + Ktor DTOs, Room, AndroidKeystore, Hilt,
+#         WorkManager, OkHttp/WebSockets, Glance, and Debug Log Stripping
 # =========================================================================
 
--keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod, RuntimeVisibleAnnotations
+-keepattributes *Annotation*, Signature, InnerClasses, EnclosingMethod, RuntimeVisibleAnnotations, RuntimeVisibleParameterAnnotations
 
-# --- Kotlinx Serialization ---
--keepattributes *Annotation*, InnerClasses
+# --- Strip verbose/debug/info logs from release bytecode ---
+-assumenosideeffects class android.util.Log {
+    public static int v(...);
+    public static int d(...);
+    public static int i(...);
+}
+
+# --- Kotlinx Serialization (Official R8 full-mode + Ktor TypeInfo reflection) ---
 -dontnote kotlinx.serialization.AnnotationsKt
--keep,includedescriptorclasses class com.techenglish.app.core.network.**$$serializer { *; }
--keepclassmembers class com.techenglish.app.core.network.** {
-    *** Companion;
-}
--keepclasseswithmembers class com.techenglish.app.core.network.** {
-    kotlinx.serialization.KSerializer serializer(...);
-}
--keep,includedescriptorclasses class com.techenglish.app.core.database.**$$serializer { *; }
+
 -keepclassmembers class kotlinx.serialization.json.** {
     *** Companion;
 }
 -keepclasseswithmembers class kotlinx.serialization.json.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
--keepclassmembers class * {
-    @kotlinx.serialization.Serializable <fields>;
+
+# Keep all @Serializable classes, Companion serializer() lookups, synthetic constructors, and $$serializer across TechEnglish
+-keep,includedescriptorclasses @kotlinx.serialization.Serializable class com.techenglish.** { *; }
+-keep,includedescriptorclasses class com.techenglish.**$$serializer { *; }
+-keepclassmembers class com.techenglish.** {
+    *** Companion;
 }
+-keepclasseswithmembers class com.techenglish.** {
+    kotlinx.serialization.KSerializer serializer(...);
+}
+
+# Generic rules for any library @Serializable classes
 -if @kotlinx.serialization.Serializable class **
 -keepclassmembers class <1> {
     static <1>$Companion Companion;
+    <init>(...);
 }
 -if @kotlinx.serialization.Serializable class **
 -keep class <1>$$serializer { *; }
+-keepclassmembers class * {
+    @kotlinx.serialization.Serializable <fields>;
+}
 
-# --- Room Database & Entities ---
+# Keep domain enums & models used across Ktor / Room / ViewModels
+-keep class com.techenglish.domain.model.** { *; }
+
+# --- Room Database, Entities, DAOs & Query Projections ---
 -keep class * extends androidx.room.RoomDatabase
--keep @androidx.room.Entity class *
+-keep @androidx.room.Database class * { *; }
+-keep @androidx.room.Entity class * { *; }
+-keep @androidx.room.Dao class * { *; }
+-keep class com.techenglish.app.core.database.entity.** { *; }
+-keep class com.techenglish.app.core.database.dao.** { *; }
 -dontwarn androidx.room.paging.**
 -keepclassmembers class * extends androidx.room.RoomDatabase {
     <init>(...);
 }
+
+# --- AndroidKeystore & Token Security ---
+-keep class com.techenglish.app.core.security.** { *; }
+-keep class android.security.keystore.** { *; }
+-keep class javax.crypto.** { *; }
 
 # --- Hilt / Dagger / WorkManager ---
 -keep class dagger.hilt.** { *; }
@@ -60,6 +85,7 @@
 -dontwarn org.openjsse.**
 -dontwarn java.lang.instrument.**
 -dontwarn sun.misc.Unsafe
+-dontwarn kotlinx.coroutines.debug.**
 
 # --- Jetpack Glance AppWidget ---
 -keep class * extends androidx.glance.appwidget.GlanceAppWidgetReceiver { *; }

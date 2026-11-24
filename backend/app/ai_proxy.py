@@ -17,6 +17,13 @@ DEFAULT_GEMINI_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "12.0
 AI_CACHE_TTL_SECONDS = int(os.getenv("AI_CACHE_TTL_SECONDS", "1800"))
 AI_CACHE_MAX_SIZE = 512
 
+
+def get_daily_ai_limit() -> int:
+    try:
+        return max(1, int(os.getenv("TECHENGLISH_AI_DAILY_LIMIT", str(MAX_AI_REQUESTS_PER_DAY))))
+    except ValueError:
+        return MAX_AI_REQUESTS_PER_DAY
+
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 _PHONE_RE = re.compile(r"(?<!\d)(?:\+?\d[\d\s\-()]{7,}\d)(?!\d)")
 _HANDLE_RE = re.compile(r"(?<!\w)@[a-zA-Z][a-zA-Z0-9_]{2,31}")
@@ -346,6 +353,11 @@ async def evaluate_interview_answer_async(
         return _heuristic_interview_fallback(
             role_key, level, effective_question, sanitized_answer, pii_scrubbed, turn_index, "gemini_timeout"
         )
+    except httpx.HTTPStatusError as exc:
+        reason = "gemini_rate_limited" if exc.response.status_code == 429 else "gemini_http_error"
+        return _heuristic_interview_fallback(
+            role_key, level, effective_question, sanitized_answer, pii_scrubbed, turn_index, reason
+        )
     except ValidationError:
         return _heuristic_interview_fallback(
             role_key, level, effective_question, sanitized_answer, pii_scrubbed, turn_index, "gemini_invalid_schema"
@@ -405,6 +417,9 @@ async def review_pr_comment_async(
         parsed = CodeReviewGeminiPayload.model_validate(raw_json)
     except httpx.TimeoutException:
         return _heuristic_code_review_fallback(sanitized, context, pii_scrubbed, "gemini_timeout")
+    except httpx.HTTPStatusError as exc:
+        reason = "gemini_rate_limited" if exc.response.status_code == 429 else "gemini_http_error"
+        return _heuristic_code_review_fallback(sanitized, context, pii_scrubbed, reason)
     except ValidationError:
         return _heuristic_code_review_fallback(sanitized, context, pii_scrubbed, "gemini_invalid_schema")
     except Exception:

@@ -5,9 +5,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.config import get_cors_origins
 from app.deps import _AUTH_RATE_BUCKETS
 from app.routers import (
     ai,
@@ -89,6 +91,13 @@ def create_app() -> FastAPI:
         version="3.1.0",
         description="FastAPI + PostgreSQL + Redis backend for TechEnglish",
         lifespan=lifespan,
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
     )
     _register_error_handlers(application)
 

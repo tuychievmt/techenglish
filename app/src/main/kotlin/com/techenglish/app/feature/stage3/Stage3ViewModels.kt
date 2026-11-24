@@ -287,6 +287,7 @@ class CloudAccountSyncViewModel @Inject constructor(
     fun signOut() {
         viewModelScope.launch {
             tokenStore.clearSession()
+            apiClient.clearAuthCache()
             _events.emit("Выход выполнен. Локальный офлайн-прогресс сохранён.")
         }
     }
@@ -299,6 +300,7 @@ class CloudAccountSyncViewModel @Inject constructor(
                     apiClient.deleteAccount()
                 }
                 tokenStore.clearSession()
+                apiClient.clearAuthCache()
                 socialCacheDao.clearProfile()
                 socialCacheDao.clearAccountLink()
                 socialCacheDao.clearFriends()

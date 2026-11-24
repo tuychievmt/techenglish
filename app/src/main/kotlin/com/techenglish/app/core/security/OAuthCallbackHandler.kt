@@ -101,6 +101,12 @@ class OAuthCallbackHandler internal constructor(
             return Result.failure(SecurityException("OAuth state mismatch"))
         }
 
+        val oauthError = uri.getQueryParameter("error")
+        if (!oauthError.isNullOrBlank()) {
+            _events.tryEmit("Вход через OAuth отменён или отклонён ($oauthError).")
+            return Result.failure(IllegalStateException("OAuth error: $oauthError"))
+        }
+
         val ticket = uri.getQueryParameter("ticket")
         if (ticket.isNullOrBlank()) {
             _events.tryEmit("Ошибка OAuth: сервер не вернул одноразовый тикет.")

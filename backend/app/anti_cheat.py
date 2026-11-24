@@ -41,6 +41,9 @@ PRESET_AVATARS = {
 ALLOWED_OAUTH_AVATAR_PREFIXES = (
     "https://avatars.githubusercontent.com/",
     "https://lh3.googleusercontent.com/",
+    "https://lh4.googleusercontent.com/",
+    "https://lh5.googleusercontent.com/",
+    "https://lh6.googleusercontent.com/",
 )
 
 DUSHANBE_TZ = timezone(timedelta(hours=5))
@@ -150,6 +153,17 @@ def validate_username(raw: str) -> str:
     if norm in RESERVED_USERNAMES or any(bad in norm for bad in BLOCKED_SUBSTRINGS):
         raise ValueError("Username is reserved or violates community guidelines.")
     return norm
+
+
+def sanitize_oauth_username(raw: Optional[str]) -> str:
+    """Normalizes OAuth provider handles (e.g. 'octo-cat', 'ivan.petrov', '123dev') before validation."""
+    candidate = re.sub(r"[^a-z0-9_]", "_", (raw or "").strip().lstrip("@").lower())
+    candidate = re.sub(r"_+", "_", candidate).strip("_")
+    if candidate and not candidate[0].isalpha():
+        candidate = f"u_{candidate}"
+    if len(candidate) < 3:
+        candidate = f"{candidate}_dev" if candidate else ""
+    return validate_username(candidate[:20])
 
 
 def is_avatar_allowed(avatar_key: str) -> bool:

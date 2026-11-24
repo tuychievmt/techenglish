@@ -325,6 +325,14 @@ fun AiMentorContent(
                                 style = MonoTagTextStyle,
                                 color = TechColors.EmeraldDark
                             )
+                            if (turn.isFallback) {
+                                Text(
+                                    text = "Резервный эвристический разбор" +
+                                        (turn.fallbackReason?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.secondary
+                                )
+                            }
                             Text(turn.feedbackRu, style = MaterialTheme.typography.bodyMedium)
                             HorizontalDivider()
                             Text("Улучшенная формулировка (EN):", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
@@ -366,6 +374,14 @@ fun AiMentorContent(
                                 modifier = Modifier.padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                if (fb.isFallback) {
+                                    Text(
+                                        text = "Резервный эвристический разбор" +
+                                            (fb.fallbackReason?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.secondary
+                                    )
+                                }
                                 Text("Оценка тона:", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
                                 Text(fb.toneAssessmentRu, style = MaterialTheme.typography.bodyMedium)
                                 HorizontalDivider()

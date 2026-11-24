@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 
 import httpx
 
-from app.config import is_prod_env
+from app.config import is_deployed_env, is_prod_env
 from app.security import hash_action_token
 
 
@@ -24,6 +24,7 @@ class OAuthUserInfo:
     email_verified: bool
     username: str
     avatar_url: str = "preset_terminal"
+    display_name: Optional[str] = None
 
 
 class OAuthProviderClient(Protocol):
@@ -122,7 +123,7 @@ class HttpOAuthProviderClient:
             if prov == "GITHUB":
                 tok = http.post(
                     "https://github.com/login/oauth/access_token",
-                    headers={"Accept": "application/json"},
+                    headers={"Accept": "application/json", "User-Agent": "TechEnglish-API/3.1"},
                     data={
                         "client_id": client_id,
                         "client_secret": client_secret,
@@ -132,34 +133,79 @@ class HttpOAuthProviderClient:
                     },
                 )
                 tok.raise_for_status()
-                access_token = tok.json().get("access_token")
-                if not access_token:
-                    raise ValueError("GitHub token exchange failed")
+                tok_json = tok.json() if tok.content else {}
+                if not isinstance(tok_json, dict):
+                    raise ValueError("GitHub token response is not a JSON object")
+                access_token = tok_json.get("access_token")
+                if not access_token or not isinstance(access_token, str):
+                    err_hint = tok_json.get("error") or "missing_access_token"
+                    raise ValueError(f"GitHub token exchange failed ({err_hint})")
                 auth_headers = {
                     "Authorization": f"Bearer {access_token}",
                     "Accept": "application/vnd.github+json",
+                    "User-Agent": "TechEnglish-API/3.1",
+                    "X-GitHub-Api-Version": "2022-11-28",
                 }
                 profile = http.get("https://api.github.com/user", headers=auth_headers)
                 profile.raise_for_status()
                 pdata = profile.json()
-                emails_resp = http.get("https://api.github.com/user/emails", headers=auth_headers)
-                email = None
+                if not isinstance(pdata, dict):
+                    raise ValueError("GitHub profile response is invalid")
+                raw_id = pdata.get("id")
+                sub_val = str(raw_id).strip() if raw_id is not None else ""
+                if not sub_val:
+                    raise ValueError("GitHub profile is missing user id")
+
+                email: Optional[str] = None
                 email_verified = False
-                if emails_resp.status_code == 200:
-                    emails = emails_resp.json()
-                    verified_primary = [e for e in emails if e.get("primary") and e.get("verified")]
-                    verified_any = [e for e in emails if e.get("verified")]
-                    chosen = (verified_primary or verified_any or [None])[0]
-                    if chosen:
-                        email = str(chosen["email"]).strip().lower()
-                        email_verified = bool(chosen.get("verified"))
+                try:
+                    emails_resp = http.get("https://api.github.com/user/emails", headers=auth_headers)
+                except httpx.HTTPError:
+                    emails_resp = None
+
+                if emails_resp is not None and emails_resp.status_code == 200:
+                    try:
+                        emails_payload = emails_resp.json()
+                    except ValueError:
+                        emails_payload = []
+                    if isinstance(emails_payload, list):
+                        valid_entries = [
+                            e for e in emails_payload
+                            if isinstance(e, dict) and isinstance(e.get("email"), str) and e.get("email").strip()
+                        ]
+                        verified_primary = [e for e in valid_entries if e.get("primary") and e.get("verified")]
+                        verified_any = [e for e in valid_entries if e.get("verified")]
+                        chosen = (verified_primary or verified_any or [None])[0]
+                        if chosen:
+                            email = chosen["email"].strip().lower()
+                            email_verified = bool(chosen.get("verified"))
+
+                login_raw = pdata.get("login")
+                username_val = (
+                    login_raw.strip()
+                    if isinstance(login_raw, str) and login_raw.strip()
+                    else f"gh_{sub_val[:12]}"
+                )
+                avatar_raw = pdata.get("avatar_url")
+                avatar_val = (
+                    avatar_raw.strip()
+                    if isinstance(avatar_raw, str) and avatar_raw.strip()
+                    else "preset_terminal"
+                )
+                name_raw = pdata.get("name")
+                display_name_val = (
+                    name_raw.strip()[:120]
+                    if isinstance(name_raw, str) and name_raw.strip()
+                    else None
+                )
                 return OAuthUserInfo(
                     provider="GITHUB",
-                    sub=str(pdata["id"]),
+                    sub=sub_val,
                     email=email,
                     email_verified=email_verified,
-                    username=str(pdata.get("login") or f"gh_{pdata['id']}"),
-                    avatar_url=str(pdata.get("avatar_url") or "preset_terminal"),
+                    username=username_val,
+                    avatar_url=avatar_val,
+                    display_name=display_name_val,
                 )
 
             if prov == "GOOGLE":
@@ -175,23 +221,64 @@ class HttpOAuthProviderClient:
                     },
                 )
                 tok.raise_for_status()
-                access_token = tok.json().get("access_token")
-                if not access_token:
-                    raise ValueError("Google token exchange failed")
+                tok_json = tok.json() if tok.content else {}
+                if not isinstance(tok_json, dict):
+                    raise ValueError("Google token response is not a JSON object")
+                access_token = tok_json.get("access_token")
+                if not access_token or not isinstance(access_token, str):
+                    err_hint = tok_json.get("error") or "missing_access_token"
+                    raise ValueError(f"Google token exchange failed ({err_hint})")
                 info_resp = http.get(
                     "https://openidconnect.googleapis.com/v1/userinfo",
                     headers={"Authorization": f"Bearer {access_token}"},
                 )
                 info_resp.raise_for_status()
                 idata = info_resp.json()
-                email_val = idata.get("email")
+                if not isinstance(idata, dict):
+                    raise ValueError("Google userinfo response is invalid")
+                raw_sub = idata.get("sub") or idata.get("id")
+                sub_val = str(raw_sub).strip() if raw_sub is not None else ""
+                if not sub_val:
+                    raise ValueError("Google userinfo is missing sub")
+
+                raw_email = idata.get("email")
+                email_val = (
+                    raw_email.strip().lower()
+                    if isinstance(raw_email, str) and raw_email.strip()
+                    else None
+                )
+                raw_ev = idata.get("email_verified")
+                email_verified = raw_ev is True or (
+                    isinstance(raw_ev, str) and raw_ev.strip().lower() == "true"
+                )
+                email_prefix = email_val.split("@")[0] if email_val and "@" in email_val else None
+                given_raw = idata.get("given_name")
+                fallback_handle = (
+                    given_raw.strip()
+                    if isinstance(given_raw, str) and given_raw.strip()
+                    else f"gg_{sub_val[:10]}"
+                )
+                username_val = email_prefix or fallback_handle
+                pic_raw = idata.get("picture")
+                avatar_val = (
+                    pic_raw.strip()
+                    if isinstance(pic_raw, str) and pic_raw.strip()
+                    else "preset_terminal"
+                )
+                name_raw = idata.get("name") or given_raw
+                display_name_val = (
+                    name_raw.strip()[:120]
+                    if isinstance(name_raw, str) and name_raw.strip()
+                    else None
+                )
                 return OAuthUserInfo(
                     provider="GOOGLE",
-                    sub=str(idata["sub"]),
-                    email=str(email_val).strip().lower() if email_val else None,
-                    email_verified=bool(idata.get("email_verified")),
-                    username=str((email_val or "google_dev").split("@")[0]),
-                    avatar_url=str(idata.get("picture") or "preset_terminal"),
+                    sub=sub_val,
+                    email=email_val,
+                    email_verified=email_verified,
+                    username=username_val,
+                    avatar_url=avatar_val,
+                    display_name=display_name_val,
                 )
         raise ValueError(f"Unsupported OAuth provider: {provider}")
 
@@ -221,8 +308,8 @@ class DevLoopbackOAuthProvider:
         code_verifier: str,
         callback_url: str,
     ) -> OAuthUserInfo:
-        if is_prod_env():
-            raise RuntimeError("DevLoopbackOAuthProvider is forbidden in ENV=prod")
+        if is_deployed_env():
+            raise RuntimeError("DevLoopbackOAuthProvider is forbidden in deployed environments")
         if not code or not code.startswith("dev_loopback_"):
             raise ValueError("Invalid dev loopback authorization code")
         prov = provider.upper()
@@ -350,6 +437,6 @@ def has_real_oauth_credentials(provider: Optional[str] = None) -> bool:
 
 
 def get_oauth_provider() -> OAuthProviderClient:
-    if has_real_oauth_credentials() or is_prod_env():
+    if has_real_oauth_credentials() or is_deployed_env():
         return _http_oauth_provider
     return _dev_oauth_provider

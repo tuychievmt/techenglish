@@ -408,7 +408,15 @@ fun CloudAccountSyncScreen(
                 OutlinedTextField(
                     value = urlInput,
                     onValueChange = { urlInput = it },
-                    label = { Text("HTTPS URL или http://10.0.2.2:8000") },
+                    label = {
+                        Text(
+                            if (com.techenglish.app.BuildConfig.DEBUG) {
+                                "HTTPS URL или http://10.0.2.2:8000"
+                            } else {
+                                "HTTPS URL сервера"
+                            }
+                        )
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )

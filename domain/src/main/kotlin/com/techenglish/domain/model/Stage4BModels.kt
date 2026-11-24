@@ -38,14 +38,18 @@ data class AiInterviewTurn(
     val technicalScore: Int,
     val feedbackRu: String,
     val improvedAnswerEn: String,
-    val nextQuestionEn: String
+    val nextQuestionEn: String,
+    val isFallback: Boolean = false,
+    val fallbackReason: String? = null
 )
 
 data class AiPrReviewFeedback(
     val toneAssessmentRu: String,
     val improvedEnglishText: String,
     val keySuggestionsRu: List<String>,
-    val remainingDailyQuota: Int
+    val remainingDailyQuota: Int,
+    val isFallback: Boolean = false,
+    val fallbackReason: String? = null
 )
 
 // =========================================================================

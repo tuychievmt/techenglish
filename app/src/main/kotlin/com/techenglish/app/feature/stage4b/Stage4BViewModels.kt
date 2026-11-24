@@ -160,7 +160,7 @@ class AiMentorViewModel @Inject constructor(
                         questionEn = state.currentQuestionEn,
                         userAnswerText = cleanText,
                         turnIndex = state.interviewTurns.size,
-                        consentAccepted = true
+                        consentAccepted = state.consentAccepted
                     )
                 )
                 val turn = AiInterviewTurn(
@@ -171,7 +171,9 @@ class AiMentorViewModel @Inject constructor(
                     technicalScore = res.technicalScore,
                     feedbackRu = res.feedbackRu,
                     improvedAnswerEn = res.improvedAnswerEn,
-                    nextQuestionEn = res.nextQuestionEn
+                    nextQuestionEn = res.nextQuestionEn,
+                    isFallback = res.isFallback == true,
+                    fallbackReason = res.fallbackReason
                 )
                 internalState.value = internalState.value.copy(
                     interviewTurns = listOf(turn) + state.interviewTurns,
@@ -211,7 +213,7 @@ class AiMentorViewModel @Inject constructor(
                     AiCodeReviewRequestDto(
                         draftText = cleanText,
                         context = context,
-                        consentAccepted = true
+                        consentAccepted = state.consentAccepted
                     )
                 )
                 internalState.value = internalState.value.copy(
@@ -219,7 +221,9 @@ class AiMentorViewModel @Inject constructor(
                         toneAssessmentRu = res.toneAssessmentRu,
                         improvedEnglishText = res.improvedEnglishText,
                         keySuggestionsRu = res.keySuggestionsRu,
-                        remainingDailyQuota = res.remainingDailyQuota
+                        remainingDailyQuota = res.remainingDailyQuota,
+                        isFallback = res.isFallback == true,
+                        fallbackReason = res.fallbackReason
                     ),
                     remainingDailyQuota = res.remainingDailyQuota
                 )

@@ -13,6 +13,10 @@ captures/
 .cxx/
 *.jks
 *.keystore
+keystore/
+keystore.properties
+*.apk
+*.aab
 .env
 .env.*
 !.env.example

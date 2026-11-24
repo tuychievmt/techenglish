@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -51,9 +53,9 @@ android {
         val crashReportingEnabled = (System.getenv("CRASH_REPORTING_ENABLED") ?: "false").toBoolean()
         val sentryDsn = (System.getenv("SENTRY_DSN") ?: "").replace("\"", "\\\"")
         val tajikUiEnabled = (System.getenv("TAJIK_UI_LOCALIZATION_ENABLED") ?: "false").toBoolean()
-        val apiBaseUrl = ((project.findProperty("API_BASE_URL") as? String)
-            ?: System.getenv("API_BASE_URL")
-            ?: "https://api.techenglish.app").trim().trimEnd('/').replace("\"", "\\\"")
+        val apiBaseUrl = (project.findProperty("API_BASE_URL")?.toString()?.takeIf { it.isNotBlank() }
+            ?: System.getenv("API_BASE_URL")?.takeIf { it.isNotBlank() }
+            ?: "https://techenglish-trwk.onrender.com").trim().trimEnd('/').replace("\"", "\\\"")
         buildConfigField("boolean", "CRASH_REPORTING_ENABLED", crashReportingEnabled.toString())
         buildConfigField("String", "SENTRY_DSN", "\"$sentryDsn\"")
         buildConfigField("boolean", "TAJIK_UI_LOCALIZATION_ENABLED", tajikUiEnabled.toString())
@@ -65,12 +67,28 @@ android {
         }
     }
 
-    val releaseKeystorePath = System.getenv("KEYSTORE_PATH")?.takeIf { it.isNotBlank() }
-    val releaseKeystorePassword = System.getenv("KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() }
-    val releaseKeyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() }
-    val releaseKeyPassword = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() }
-    val hasReleaseSigning = releaseKeystorePath != null &&
-        file(releaseKeystorePath).exists() &&
+    val keystoreProps = Properties().apply {
+        val candidates = listOf(
+            rootProject.file("keystore/keystore.properties"),
+            rootProject.file("keystore.properties")
+        )
+        candidates.firstOrNull { it.isFile }?.inputStream()?.use { load(it) }
+    }
+    fun signingProp(envKey: String, propKey: String): String? =
+        System.getenv(envKey)?.takeIf { it.isNotBlank() }
+            ?: project.findProperty(envKey)?.toString()?.takeIf { it.isNotBlank() }
+            ?: keystoreProps.getProperty(propKey)?.trim()?.takeIf { it.isNotBlank() }
+
+    val releaseKeystorePath = signingProp("KEYSTORE_PATH", "storeFile")
+    val releaseKeystoreFile = releaseKeystorePath?.let { path ->
+        val f = file(path)
+        if (f.isAbsolute) f else rootProject.file(path)
+    }
+    val releaseKeystorePassword = signingProp("KEYSTORE_PASSWORD", "storePassword")
+    val releaseKeyAlias = signingProp("KEY_ALIAS", "keyAlias")
+    val releaseKeyPassword = signingProp("KEY_PASSWORD", "keyPassword")
+    val hasReleaseSigning = releaseKeystoreFile != null &&
+        releaseKeystoreFile.exists() &&
         releaseKeystorePassword != null &&
         releaseKeyAlias != null &&
         releaseKeyPassword != null
@@ -78,16 +96,20 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                storeFile = file(releaseKeystorePath!!)
+                storeFile = releaseKeystoreFile!!
                 storePassword = releaseKeystorePassword
                 keyAlias = releaseKeyAlias
                 keyPassword = releaseKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }
 
     buildTypes {
         release {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             if (hasReleaseSigning) {

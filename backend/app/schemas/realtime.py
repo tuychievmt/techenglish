@@ -8,17 +8,17 @@ from app.voice_storage import MAX_VOICE_SECONDS
 
 
 class AiInterviewRequest(BaseModel):
-    role: str = Field(default="backend")
-    level: str = Field(default="middle")
-    question_en: str = Field(default="")
-    user_answer_text: str
-    turn_index: int = Field(default=0, ge=0)
+    role: str = Field(default="backend", max_length=64)
+    level: str = Field(default="middle", max_length=64)
+    question_en: str = Field(default="", max_length=600)
+    user_answer_text: str = Field(max_length=4000)
+    turn_index: int = Field(default=0, ge=0, le=1000)
     consent_accepted: bool = Field(default=False)
 
 
 class AiCodeReviewRequest(BaseModel):
-    draft_text: str
-    context: str = Field(default="pull_request")
+    draft_text: str = Field(max_length=4000)
+    context: str = Field(default="pull_request", max_length=64)
     consent_accepted: bool = Field(default=False)
 
 

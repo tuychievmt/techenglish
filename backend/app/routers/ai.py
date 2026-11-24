@@ -11,6 +11,7 @@ from app.ai_proxy import (
     MAX_AI_REQUESTS_PER_DAY,
     GeminiAiClient,
     evaluate_interview_answer_async,
+    get_daily_ai_limit,
     get_gemini_client,
     review_pr_comment_async,
 )
@@ -33,11 +34,12 @@ def _ai_used_today(db: Session, user_id: str) -> int:
 
 @router.get("/v1/ai/quota")
 def get_ai_quota(user: UserRow = Depends(get_current_user), db: Session = Depends(get_db)):
+    limit = get_daily_ai_limit()
     used = _ai_used_today(db, user.id)
     return {
-        "daily_limit": MAX_AI_REQUESTS_PER_DAY,
+        "daily_limit": limit,
         "used_today": used,
-        "remaining_today": max(0, MAX_AI_REQUESTS_PER_DAY - used),
+        "remaining_today": max(0, limit - used),
         "audio_stored": False,
         "profile_pii_forwarded": False,
     }
@@ -58,8 +60,9 @@ async def ai_mock_interview(
     if len(body.user_answer_text.strip()) < 5:
         raise HTTPException(status_code=422, detail="Answer must be at least 5 characters.")
 
+    limit = get_daily_ai_limit()
     used = _ai_used_today(db, user.id)
-    if used >= MAX_AI_REQUESTS_PER_DAY:
+    if used >= limit:
         raise HTTPException(status_code=429, detail="Daily AI request quota exceeded (ФТ-8.3).")
 
     result = await evaluate_interview_answer_async(
@@ -80,7 +83,7 @@ async def ai_mock_interview(
         )
     )
     db.commit()
-    result["remaining_daily_quota"] = max(0, MAX_AI_REQUESTS_PER_DAY - (used + 1))
+    result["remaining_daily_quota"] = max(0, limit - (used + 1))
     result["audio_stored"] = False
     return result
 
@@ -100,8 +103,9 @@ async def ai_code_review(
     if len(body.draft_text.strip()) < 5:
         raise HTTPException(status_code=422, detail="Draft text must be at least 5 characters.")
 
+    limit = get_daily_ai_limit()
     used = _ai_used_today(db, user.id)
-    if used >= MAX_AI_REQUESTS_PER_DAY:
+    if used >= limit:
         raise HTTPException(status_code=429, detail="Daily AI request quota exceeded (ФТ-8.3).")
 
     result = await review_pr_comment_async(
@@ -119,5 +123,5 @@ async def ai_code_review(
         )
     )
     db.commit()
-    result["remaining_daily_quota"] = max(0, MAX_AI_REQUESTS_PER_DAY - (used + 1))
+    result["remaining_daily_quota"] = max(0, limit - (used + 1))
     return result

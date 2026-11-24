@@ -161,11 +161,14 @@ class AndroidKeystoreTokenStore internal constructor(
 
     suspend fun setApiBaseUrl(url: String) {
         val clean = url.trim().trimEnd('/')
+        val allowLocalCleartext = com.techenglish.app.BuildConfig.DEBUG
         if (
             clean.startsWith("https://") ||
-            clean.startsWith("http://10.0.2.2") ||
-            clean.startsWith("http://localhost") ||
-            clean.startsWith("http://127.0.0.1")
+            (allowLocalCleartext && (
+                clean.startsWith("http://10.0.2.2") ||
+                clean.startsWith("http://localhost") ||
+                clean.startsWith("http://127.0.0.1")
+            ))
         ) {
             context.tokenDataStore.edit { it[Keys.API_BASE_URL] = clean }
         }

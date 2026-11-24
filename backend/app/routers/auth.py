@@ -12,9 +12,11 @@ from urllib.parse import parse_qs, urlencode
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.anti_cheat import is_avatar_allowed, validate_username
+from app.anti_cheat import is_avatar_allowed, sanitize_oauth_username, validate_username
+from app.config import get_public_base_url
 from app.deps import (
     ACTION_TOKEN_TTL_MS,
     MAX_TOKEN_ATTEMPTS,
@@ -201,6 +203,19 @@ def confirm_password_reset(body: PasswordResetConfirmRequest, db: Session = Depe
     return {"reset": True}
 
 
+def _resolve_oauth_callback_url(request: Request, provider_slug: str) -> str:
+    public_base = get_public_base_url()
+    if public_base:
+        return f"{public_base}/v1/auth/oauth/{provider_slug}/callback"
+    raw_url = str(request.url_for("oauth_callback", provider=provider_slug))
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    host = (request.headers.get("host") or "").strip().lower()
+    if (forwarded_proto == "https" or host.endswith(".onrender.com")) and raw_url.startswith("http://"):
+        raw_url = "https://" + raw_url[len("http://"):]
+    return raw_url
+
+
+@router.get("/v1/auth/oauth/{provider}/start")
 @router.get("/v1/auth/oauth/{provider}/authorize")
 def oauth_authorize(
     provider: str,
@@ -222,7 +237,7 @@ def oauth_authorize(
         redirect_uri=redirect_uri,
         client_state=client_state,
     )
-    callback_url = str(request.url_for("oauth_callback", provider=prov.lower()))
+    callback_url = _resolve_oauth_callback_url(request, prov.lower())
     try:
         provider_url = oauth_provider.build_authorize_url(
             provider=prov,
@@ -239,8 +254,9 @@ def oauth_authorize(
 def oauth_callback(
     provider: str,
     request: Request,
-    code: str = Query(..., min_length=1),
+    code: Optional[str] = Query(default=None),
     state: str = Query(..., min_length=1),
+    error: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     oauth_provider: OAuthProviderClient = Depends(get_oauth_provider),
 ):
@@ -252,14 +268,29 @@ def oauth_callback(
     if not state_record:
         raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
 
-    callback_url = str(request.url_for("oauth_callback", provider=prov.lower()))
+    if error:
+        err_params = {"error": error[:64]}
+        if state_record.get("client_state"):
+            err_params["state"] = str(state_record["client_state"])
+        return RedirectResponse(
+            url=f"{state_record['redirect_uri']}?{urlencode(err_params)}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    clean_code = (code or "").strip()
+    if not clean_code:
+        raise HTTPException(status_code=400, detail="Missing OAuth authorization code")
+
+    callback_url = _resolve_oauth_callback_url(request, prov.lower())
     try:
         info = oauth_provider.exchange_code_for_user(
             provider=prov,
-            code=code,
+            code=clean_code,
             code_verifier=str(state_record["code_verifier"]),
             callback_url=callback_url,
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"OAuth provider code exchange failed: {exc}")
 
@@ -271,9 +302,13 @@ def oauth_callback(
     user: Optional[UserRow] = None
     if identity:
         user = db.get(UserRow, identity.user_id)
+        if user is None:
+            db.delete(identity)
+            db.flush()
+            identity = None
 
     if user is None:
-        clean_email = info.email.strip().lower() if info.email else None
+        clean_email = info.email.strip().lower() if isinstance(info.email, str) and info.email.strip() else None
         if clean_email:
             existing = db.query(UserRow).filter(UserRow.email == clean_email).first()
             if existing is not None:
@@ -285,18 +320,25 @@ def oauth_callback(
                 user = existing
         if user is None:
             try:
-                clean_username = validate_username(info.username)
+                clean_username = sanitize_oauth_username(info.username)
             except ValueError:
                 clean_username = f"dev_{secrets.token_hex(4)}"
             if db.query(UserRow).filter(UserRow.username == clean_username).first():
                 clean_username = f"{clean_username[:12]}_{secrets.token_hex(3)}"
-            avatar = info.avatar_url if info.avatar_url and is_avatar_allowed(info.avatar_url) else "preset_terminal"
+            raw_avatar = (info.avatar_url or "").strip()
+            avatar = (
+                raw_avatar
+                if (raw_avatar and len(raw_avatar) <= 512 and is_avatar_allowed(raw_avatar))
+                else "preset_terminal"
+            )
+            display_name = (info.display_name or "").strip()[:120] or clean_username
             user = UserRow(
                 id=str(uuid.uuid4()),
                 username=clean_username,
                 email=clean_email if info.email_verified else None,
                 provider=prov,
                 is_email_verified=bool(info.email_verified and clean_email),
+                display_name=display_name,
                 avatar_key=avatar,
                 created_at_ms=now_ms(),
             )
@@ -312,7 +354,11 @@ def oauth_callback(
                 created_at_ms=now_ms(),
             )
         )
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="OAuth identity conflict; please retry.")
 
     ticket = oauth_flow_store.issue_ticket(user.id)
     redirect_params = {"ticket": ticket}

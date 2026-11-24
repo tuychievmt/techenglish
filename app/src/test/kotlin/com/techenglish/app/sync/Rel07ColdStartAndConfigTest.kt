@@ -2,8 +2,18 @@ package com.techenglish.app.sync
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.techenglish.app.BuildConfig
+import com.techenglish.app.core.network.AiCodeReviewRequestDto
+import com.techenglish.app.core.network.AiInterviewRequestDto
+import com.techenglish.app.core.network.LoginBodyDto
 import com.techenglish.app.core.network.TechEnglishApiClient
 import com.techenglish.app.core.security.AndroidKeystoreTokenStore
+import io.ktor.client.engine.mock.MockEngine
+import io.ktor.client.engine.mock.respond
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
+import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -25,10 +35,117 @@ class Rel07ColdStartAndConfigTest {
     }
 
     @Test
-    fun `TechEnglishApiClient timeouts accommodate 65s free-tier cold start`() {
-        assertEquals(15_000L, TechEnglishApiClient.CONNECT_TIMEOUT_MS)
-        assertEquals(65_000L, TechEnglishApiClient.REQUEST_TIMEOUT_MS)
-        assertEquals(65_000L, TechEnglishApiClient.SOCKET_TIMEOUT_MS)
+    fun `TechEnglishApiClient timeouts and Render base URL accommodate free-tier cold start`() {
+        assertEquals("https://techenglish-trwk.onrender.com", BuildConfig.API_BASE_URL)
+        assertEquals(BuildConfig.API_BASE_URL, TechEnglishApiClient.DEFAULT_BASE_URL)
+        assertEquals(30_000L, TechEnglishApiClient.CONNECT_TIMEOUT_MS)
+        assertEquals(60_000L, TechEnglishApiClient.READ_TIMEOUT_MS)
+        assertEquals(60_000L, TechEnglishApiClient.WRITE_TIMEOUT_MS)
+        assertEquals(60_000L, TechEnglishApiClient.CALL_TIMEOUT_MS)
+        assertEquals(60_000L, TechEnglishApiClient.REQUEST_TIMEOUT_MS)
+        assertEquals(60_000L, TechEnglishApiClient.SOCKET_TIMEOUT_MS)
+    }
+
+    @Test
+    fun `login access_token is forwarded via Bearer interceptor to AI endpoints with consent and fallback handling`() = runBlocking {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val tokenStore = AndroidKeystoreTokenStore(context)
+        tokenStore.clearSession()
+
+        var interviewBodyJson = ""
+        var codeReviewBodyJson = ""
+        val mockEngine = MockEngine { request ->
+            val path = request.url.encodedPath
+            val authHeader = request.headers[HttpHeaders.Authorization]
+            when {
+                path == "/v1/auth/login" -> respond(
+                    content = """
+                        {
+                          "access_token": "render_jwt_token_123",
+                          "refresh_token": "render_refresh_token_456",
+                          "user_id": "u-render-1",
+                          "username": "render_dev",
+                          "provider": "EMAIL",
+                          "is_email_verified": true
+                        }
+                    """.trimIndent(),
+                    status = HttpStatusCode.OK,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+                path == "/v1/ai/interview" && authHeader == "Bearer render_jwt_token_123" -> {
+                    interviewBodyJson = (request.body as? TextContent)?.text.orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "provider": "heuristic-fallback",
+                              "is_fallback": true,
+                              "fallback_reason": "gemini_api_key_not_configured",
+                              "question_en": "How do you ensure idempotency?",
+                              "english_score": 82,
+                              "technical_score": 88,
+                              "feedback_ru": "Хорошее использование профильной лексики.",
+                              "improved_answer_en": "In production, I use idempotency keys.",
+                              "next_question_en": "When would you choose optimistic locking?",
+                              "remaining_daily_quota": 14
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
+                path == "/v1/ai/code-review" && authHeader == "Bearer render_jwt_token_123" -> {
+                    codeReviewBodyJson = (request.body as? TextContent)?.text.orEmpty()
+                    respond(
+                        content = """
+                            {
+                              "provider": "heuristic-fallback",
+                              "is_fallback": true,
+                              "fallback_reason": "gemini_timeout",
+                              "tone_assessment_ru": "Конструктивный и профессиональный тон.",
+                              "improved_english_text": "Could we extract this helper?",
+                              "key_suggestions_ru": ["Добавьте обоснование."],
+                              "remaining_daily_quota": 13
+                            }
+                        """.trimIndent(),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, "application/json")
+                    )
+                }
+                else -> respond(
+                    content = """{"detail":"Unexpected $path auth=$authHeader"}""",
+                    status = HttpStatusCode.Unauthorized,
+                    headers = headersOf(HttpHeaders.ContentType, "application/json")
+                )
+            }
+        }
+
+        val apiClient = TechEnglishApiClient(
+            context = context,
+            tokenStore = tokenStore,
+            engineOverride = mockEngine
+        )
+
+        val loginResp = apiClient.login(LoginBodyDto(email = "dev@example.com", password = "password123"))
+        assertEquals("render_jwt_token_123", loginResp.accessToken)
+
+        val interviewResp = apiClient.submitAiInterview(
+            AiInterviewRequestDto(
+                role = "backend",
+                level = "middle",
+                questionEn = "How do you ensure idempotency?",
+                userAnswerText = "I use idempotency keys and database constraints."
+            )
+        )
+        assertTrue(interviewBodyJson.contains("\"consent_accepted\":true"))
+        assertEquals(true, interviewResp.isFallback)
+        assertEquals("gemini_api_key_not_configured", interviewResp.fallbackReason)
+
+        val reviewResp = apiClient.submitAiCodeReview(
+            AiCodeReviewRequestDto(draftText = "Please extract this function to avoid duplication.")
+        )
+        assertTrue(codeReviewBodyJson.contains("\"consent_accepted\":true"))
+        assertEquals(true, reviewResp.isFallback)
+        assertEquals("gemini_timeout", reviewResp.fallbackReason)
     }
 
     @Test

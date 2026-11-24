@@ -3,7 +3,9 @@ package com.techenglish.app.core.network
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import com.techenglish.app.BuildConfig
 import com.techenglish.app.core.security.AndroidKeystoreTokenStore
+import com.techenglish.domain.model.AuthProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -18,6 +20,7 @@ import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.plugin
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.HttpRequestPipeline
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
@@ -38,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -340,11 +344,14 @@ data class AiInterviewRequestDto(
     @SerialName("question_en") val questionEn: String,
     @SerialName("user_answer_text") val userAnswerText: String,
     @SerialName("turn_index") val turnIndex: Int = 0,
-    @SerialName("consent_accepted") val consentAccepted: Boolean
+    @SerialName("consent_accepted") val consentAccepted: Boolean = true
 )
 
 @Serializable
 data class AiInterviewResponseDto(
+    val provider: String? = null,
+    @SerialName("is_fallback") val isFallback: Boolean? = null,
+    @SerialName("fallback_reason") val fallbackReason: String? = null,
     @SerialName("question_en") val questionEn: String = "",
     @SerialName("english_score") val englishScore: Int = 80,
     @SerialName("technical_score") val technicalScore: Int = 80,
@@ -358,11 +365,14 @@ data class AiInterviewResponseDto(
 data class AiCodeReviewRequestDto(
     @SerialName("draft_text") val draftText: String,
     val context: String = "pull_request",
-    @SerialName("consent_accepted") val consentAccepted: Boolean
+    @SerialName("consent_accepted") val consentAccepted: Boolean = true
 )
 
 @Serializable
 data class AiCodeReviewResponseDto(
+    val provider: String? = null,
+    @SerialName("is_fallback") val isFallback: Boolean? = null,
+    @SerialName("fallback_reason") val fallbackReason: String? = null,
     @SerialName("tone_assessment_ru") val toneAssessmentRu: String = "",
     @SerialName("improved_english_text") val improvedEnglishText: String = "",
     @SerialName("key_suggestions_ru") val keySuggestionsRu: List<String> = emptyList(),
@@ -665,9 +675,22 @@ class TechEnglishApiClient internal constructor(
             path == "/health"
     }
 
+    @Volatile
+    private var cachedAccessTokenSnapshot: String? = null
+
+    private suspend fun resolveBaseUrl(): String =
+        tokenStore.getApiBaseUrl().ifBlank { DEFAULT_BASE_URL }.trimEnd('/')
+
     private val httpClient: HttpClient by lazy {
-        val engine = engineOverride ?: OkHttp.create()
-        HttpClient(engine) {
+        val engine = engineOverride ?: OkHttp.create {
+            config {
+                connectTimeout(CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }
+        }
+        val client = HttpClient(engine) {
             install(HttpTimeout) {
                 connectTimeoutMillis = CONNECT_TIMEOUT_MS
                 requestTimeoutMillis = REQUEST_TIMEOUT_MS
@@ -682,6 +705,7 @@ class TechEnglishApiClient internal constructor(
                     loadTokens {
                         val access = tokenStore.getAccessToken()
                         val refresh = tokenStore.getRefreshToken()
+                        cachedAccessTokenSnapshot = access
                         if (!access.isNullOrBlank()) {
                             BearerTokens(accessToken = access, refreshToken = refresh.orEmpty())
                         } else {
@@ -692,7 +716,7 @@ class TechEnglishApiClient internal constructor(
                         val refresh = oldTokens?.refreshToken?.takeIf { it.isNotBlank() }
                             ?: tokenStore.getRefreshToken()?.takeIf { it.isNotBlank() }
                             ?: return@refreshTokens null
-                        val base = tokenStore.getApiBaseUrl()
+                        val base = resolveBaseUrl()
                         val resp = runCatching {
                             client.post("$base/v1/auth/refresh") {
                                 markAsRefreshTokenRequest()
@@ -703,6 +727,7 @@ class TechEnglishApiClient internal constructor(
 
                         if (!resp.status.isSuccess()) {
                             tokenStore.clearSession()
+                            cachedAccessTokenSnapshot = null
                             return@refreshTokens null
                         }
                         val refreshed = runCatching { resp.body<AuthResponseDto>() }.getOrNull()
@@ -711,6 +736,7 @@ class TechEnglishApiClient internal constructor(
                             accessToken = refreshed.accessToken,
                             refreshToken = refreshed.refreshToken
                         )
+                        cachedAccessTokenSnapshot = refreshed.accessToken
                         BearerTokens(
                             accessToken = refreshed.accessToken,
                             refreshToken = refreshed.refreshToken
@@ -723,14 +749,32 @@ class TechEnglishApiClient internal constructor(
                 }
             }
         }
+        // Keep Ktor BearerAuthProvider synchronized with AndroidKeystoreTokenStore whenever tokens change
+        // (e.g., immediately after /v1/auth/login, account switch, or logout).
+        client.requestPipeline.intercept(HttpRequestPipeline.Before) {
+            val path = context.url.encodedPath
+            if (path.startsWith("/v1/") && !isPublicAuthEndpoint(path)) {
+                val latestAccess = tokenStore.getAccessToken()
+                if (latestAccess != cachedAccessTokenSnapshot) {
+                    cachedAccessTokenSnapshot = latestAccess
+                    clearAuthCache(client)
+                }
+            }
+        }
+        client
     }
 
-    fun clearAuthCache() {
+    private fun clearAuthCache(client: HttpClient) {
         runCatching {
-            httpClient.plugin(Auth).providers
+            client.plugin(Auth).providers
                 .filterIsInstance<BearerAuthProvider>()
                 .forEach { it.clearToken() }
         }
+    }
+
+    fun clearAuthCache() {
+        cachedAccessTokenSnapshot = null
+        clearAuthCache(httpClient)
     }
 
     fun isNetworkAvailable(): Boolean = runCatching {
@@ -742,31 +786,55 @@ class TechEnglishApiClient internal constructor(
     }.getOrDefault(false)
 
     suspend fun register(body: RegisterBodyDto): AuthResponseDto {
-        val base = tokenStore.getApiBaseUrl()
-        return httpClient.post("$base/v1/auth/register") {
+        val base = resolveBaseUrl()
+        val response: AuthResponseDto = httpClient.post("$base/v1/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(body)
         }.body()
+        tokenStore.saveTokensAndSession(
+            accessToken = response.accessToken,
+            refreshToken = response.refreshToken,
+            userId = response.userId,
+            username = response.username,
+            email = body.email.trim(),
+            provider = AuthProvider.fromRaw(response.provider)
+        )
+        cachedAccessTokenSnapshot = response.accessToken
+        clearAuthCache(httpClient)
+        return response
     }
 
     suspend fun login(body: LoginBodyDto): AuthResponseDto {
-        val base = tokenStore.getApiBaseUrl()
-        return httpClient.post("$base/v1/auth/login") {
+        val base = resolveBaseUrl()
+        val response: AuthResponseDto = httpClient.post("$base/v1/auth/login") {
             contentType(ContentType.Application.Json)
             setBody(body)
         }.body()
+        tokenStore.saveTokensAndSession(
+            accessToken = response.accessToken,
+            refreshToken = response.refreshToken,
+            userId = response.userId,
+            username = response.username,
+            email = body.email.trim(),
+            provider = AuthProvider.fromRaw(response.provider)
+        )
+        cachedAccessTokenSnapshot = response.accessToken
+        clearAuthCache(httpClient)
+        return response
     }
 
     suspend fun exchangeOAuthTicket(ticket: String): AuthResponseDto {
-        val base = tokenStore.getApiBaseUrl()
-        return httpClient.post("$base/v1/auth/oauth/ticket/exchange") {
+        val base = resolveBaseUrl()
+        val response: AuthResponseDto = httpClient.post("$base/v1/auth/oauth/ticket/exchange") {
             contentType(ContentType.Application.Json)
             setBody(OAuthTicketExchangeBodyDto(ticket = ticket))
         }.body()
+        clearAuthCache(httpClient)
+        return response
     }
 
     suspend fun syncEvents(batch: SyncBatchBodyDto): SyncBatchResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/sync/events") {
             contentType(ContentType.Application.Json)
@@ -775,13 +843,13 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun fetchSyncState(): SyncStateResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/sync/state").body()
     }
 
     suspend fun linkGuestProgress(batch: SyncBatchBodyDto): SyncBatchResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/auth/guest/link") {
             contentType(ContentType.Application.Json)
@@ -790,25 +858,25 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun deleteAccount() {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.delete("$base/v1/account")
     }
 
     suspend fun fetchLeaderboard(tabApiKey: String): LeaderboardResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/leaderboards/$tabApiKey").body()
     }
 
     suspend fun fetchFriends(): FriendsListResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/friends").body()
     }
 
     suspend fun addFriend(username: String) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/friends/add") {
             contentType(ContentType.Application.Json)
@@ -817,13 +885,13 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun pingFriend(friendId: String) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/friends/$friendId/ping")
     }
 
     suspend fun registerPushDeviceToken(deviceToken: String, platform: String = "ANDROID"): Boolean {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: return false
         val response = httpClient.post("$base/v1/notifications/device-token") {
             contentType(ContentType.Application.Json)
@@ -833,7 +901,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun unregisterPushDeviceToken(deviceToken: String? = null): Boolean {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: return false
         val response = httpClient.delete("$base/v1/notifications/device-token") {
             contentType(ContentType.Application.Json)
@@ -843,25 +911,25 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun fetchActivityFeed(): FeedResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/friends/feed").body()
     }
 
     suspend fun reactToFeedEvent(eventId: String): FeedReactResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/friends/feed/$eventId/react").body()
     }
 
     suspend fun fetchMyProfile(): ProfileResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/profile/me").body()
     }
 
     suspend fun updateMyProfile(body: ProfileUpdateBodyDto): ProfileResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.patch("$base/v1/profile/me") {
             contentType(ContentType.Application.Json)
@@ -874,7 +942,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun reportContent(targetType: String, targetId: String, reason: String) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/moderation/report") {
             contentType(ContentType.Application.Json)
@@ -883,7 +951,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun blockUser(targetUserId: String) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/moderation/block/$targetUserId")
     }
@@ -891,13 +959,13 @@ class TechEnglishApiClient internal constructor(
     // Stage 4A — Comments & Mnemonics (ФТ-13.1)
 
     suspend fun fetchComments(targetType: String, targetId: Int, sort: String = "top"): CommentsListResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/comments/$targetType/$targetId?sort=$sort").body()
     }
 
     suspend fun postComment(targetType: String, targetId: Int, bodyText: String): CommentItemDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/comments") {
             contentType(ContentType.Application.Json)
@@ -906,7 +974,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun voteComment(commentId: String, vote: Int) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/comments/$commentId/vote") {
             contentType(ContentType.Application.Json)
@@ -917,13 +985,13 @@ class TechEnglishApiClient internal constructor(
     // Stage 4A — Community Decks (ФТ-13.2)
 
     suspend fun fetchCommunityDecks(): CommunityDecksListResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/decks").body()
     }
 
     suspend fun publishCommunityDeck(body: PublishDeckBodyDto): CommunityDeckSummaryDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/decks") {
             contentType(ContentType.Application.Json)
@@ -932,13 +1000,13 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun downloadCommunityDeck(deckId: String): DownloadDeckResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/decks/$deckId/download").body()
     }
 
     suspend fun rateCommunityDeck(deckId: String, stars: Int): RateDeckResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/decks/$deckId/rate") {
             contentType(ContentType.Application.Json)
@@ -949,13 +1017,13 @@ class TechEnglishApiClient internal constructor(
     // Stage 4B — AI Mentor Server Proxy (ФТ-8.1–8.3 — zero client API keys)
 
     suspend fun fetchAiQuota(): AiQuotaResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/ai/quota").body()
     }
 
     suspend fun submitAiInterview(body: AiInterviewRequestDto): AiInterviewResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/ai/interview") {
             contentType(ContentType.Application.Json)
@@ -964,7 +1032,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun submitAiCodeReview(body: AiCodeReviewRequestDto): AiCodeReviewResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/ai/code-review") {
             contentType(ContentType.Application.Json)
@@ -975,13 +1043,13 @@ class TechEnglishApiClient internal constructor(
     // Stage 4B — Squads (ФТ-14.4)
 
     suspend fun fetchMySquad(): MySquadResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/squads/my").body()
     }
 
     suspend fun createSquad(name: String, weeklyGoalXp: Int): SquadDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/squads") {
             contentType(ContentType.Application.Json)
@@ -990,7 +1058,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun joinSquad(inviteCode: String): SquadDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/squads/join") {
             contentType(ContentType.Application.Json)
@@ -999,7 +1067,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun leaveSquad() {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/squads/leave")
     }
@@ -1007,19 +1075,19 @@ class TechEnglishApiClient internal constructor(
     // Stage 4B — Dictionary Crowdsourcing PRs (ФТ-14.3)
 
     suspend fun fetchCrowdsourceEligibility(): CrowdsourceEligibilityResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/crowdsource/eligibility").body()
     }
 
     suspend fun fetchDictionaryPrs(): DictionaryPrListResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/crowdsource/prs").body()
     }
 
     suspend fun submitDictionaryPr(body: SubmitDictionaryPrBodyDto) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/crowdsource/prs") {
             contentType(ContentType.Application.Json)
@@ -1028,7 +1096,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun voteDictionaryPr(prId: String, vote: Int) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/crowdsource/prs/$prId/vote") {
             contentType(ContentType.Application.Json)
@@ -1039,13 +1107,13 @@ class TechEnglishApiClient internal constructor(
     // Stage 4C — Thematic Rooms REST + Ktor WebSockets (ФТ-13.3)
 
     suspend fun fetchRoomMessages(roomSlug: String): RoomMessagesListResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/rooms/$roomSlug/messages").body()
     }
 
     suspend fun postRoomMessage(roomSlug: String, bodyText: String): RoomMessageDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/rooms/$roomSlug/messages") {
             contentType(ContentType.Application.Json)
@@ -1054,7 +1122,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun requestWsTicket(scope: String = "ws"): WsTicketResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/ws/ticket?scope=$scope").body()
     }
@@ -1071,7 +1139,7 @@ class TechEnglishApiClient internal constructor(
         onMessage: suspend (RoomMessageDto) -> Unit,
         onStatusChanged: (WsConnectionState) -> Unit = {}
     ) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         if (tokenStore.getAccessToken().isNullOrBlank()) {
             onStatusChanged(WsConnectionState.DISCONNECTED)
             return
@@ -1111,7 +1179,7 @@ class TechEnglishApiClient internal constructor(
         onEvent: suspend (PvpWsEventDto) -> Unit,
         onStatusChanged: (WsConnectionState) -> Unit = {}
     ) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         if (tokenStore.getAccessToken().isNullOrBlank()) {
             onStatusChanged(WsConnectionState.DISCONNECTED)
             return
@@ -1152,7 +1220,7 @@ class TechEnglishApiClient internal constructor(
     // Stage 4C — PvP 1v1 Duels (ФТ-14.1)
 
     suspend fun matchmakePvp(forceTrainingFallback: Boolean = false): PvpMatchmakeResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/pvp/matchmake") {
             contentType(ContentType.Application.Json)
@@ -1161,7 +1229,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun submitPvpAnswers(matchId: String, answers: List<Int>): PvpSubmitResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.post("$base/v1/pvp/$matchId/submit") {
             contentType(ContentType.Application.Json)
@@ -1170,7 +1238,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun disconnectPvp(matchId: String, reason: String = "network_drop") {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: return
         runCatching {
             httpClient.post("$base/v1/pvp/$matchId/disconnect") {
@@ -1183,18 +1251,18 @@ class TechEnglishApiClient internal constructor(
     // Stage 4C — Peer Review Arena (ФТ-14.2 & Errata E5)
 
     suspend fun fetchDailyPeerCase(): PeerReviewCaseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         return httpClient.get("$base/v1/peer-review/daily-case").body()
     }
 
     suspend fun fetchPeerSubmissions(): PeerReviewSubmissionsResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/peer-review/submissions").body()
     }
 
     suspend fun submitPeerReview(body: PeerReviewSubmitBodyDto) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/peer-review/submissions") {
             contentType(ContentType.Application.Json)
@@ -1203,7 +1271,7 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun postPeerFeedback(submissionId: String, ratingStars: Int, commentText: String) {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         httpClient.post("$base/v1/peer-review/submissions/$submissionId/feedback") {
             contentType(ContentType.Application.Json)
@@ -1212,18 +1280,18 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun fetchPeerReviewVoiceUrl(submissionId: String): PeerReviewVoiceUrlResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
         return httpClient.get("$base/v1/peer-review/submissions/$submissionId/voice-url").body()
     }
 
     suspend fun fetchOtaManifest(): OtaManifestResponseDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         return httpClient.get("$base/v1/ota/manifest").body()
     }
 
     suspend fun fetchOtaPack(packId: String): OtaPackDownloadDto {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         return httpClient.get("$base/v1/ota/packs/$packId").body()
     }
 
@@ -1232,13 +1300,17 @@ class TechEnglishApiClient internal constructor(
     }
 
     suspend fun warmupHealth(): Boolean = runCatching {
-        val base = tokenStore.getApiBaseUrl()
+        val base = resolveBaseUrl()
         httpClient.get("$base/health").status.isSuccess()
     }.getOrDefault(false)
 
     companion object {
-        const val CONNECT_TIMEOUT_MS = 15_000L
-        const val REQUEST_TIMEOUT_MS = 65_000L
-        const val SOCKET_TIMEOUT_MS = 65_000L
+        val DEFAULT_BASE_URL: String = BuildConfig.API_BASE_URL
+        const val CONNECT_TIMEOUT_MS = 30_000L
+        const val READ_TIMEOUT_MS = 60_000L
+        const val WRITE_TIMEOUT_MS = 60_000L
+        const val CALL_TIMEOUT_MS = 60_000L
+        const val REQUEST_TIMEOUT_MS = CALL_TIMEOUT_MS
+        const val SOCKET_TIMEOUT_MS = READ_TIMEOUT_MS
     }
 }

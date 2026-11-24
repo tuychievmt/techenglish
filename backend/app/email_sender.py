@@ -12,6 +12,8 @@ logger = logging.getLogger("techenglish.email")
 class EmailSender(Protocol):
     is_fake: bool
 
+    def send(self, to_email: str, subject: str, body_text: str) -> None: ...
+
     def send_verification_email(self, to_email: str, token: str) -> None: ...
 
     def send_password_reset_email(self, to_email: str, token: str) -> None: ...
@@ -51,6 +53,9 @@ class SmtpEmailSender:
                 smtp.login(self.username, self.password)
             smtp.send_message(msg)
 
+    def send(self, to_email: str, subject: str, body_text: str) -> None:
+        self._send(to_email, subject, body_text)
+
     def send_verification_email(self, to_email: str, token: str) -> None:
         self._send(
             to_email,
@@ -73,6 +78,10 @@ class ConsoleEmailSender:
 
     def __init__(self) -> None:
         self.outbox: List[Dict[str, str]] = []
+
+    def send(self, to_email: str, subject: str, body_text: str) -> None:
+        self.outbox.append({"kind": "generic", "to": to_email, "subject": subject, "body": body_text})
+        logger.info("[DEV EMAIL] Generic email queued for %s", to_email)
 
     def send_verification_email(self, to_email: str, token: str) -> None:
         self.outbox.append({"kind": "verify", "to": to_email, "token": token})
