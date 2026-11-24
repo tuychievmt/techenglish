@@ -1,0 +1,24 @@
+{
+  "locale": "tg",
+  "policy": "R7 — human verification required before enabling values-tg",
+  "entries": [
+    {"key": "tab_home", "ru": "Главная", "tg_draft": "Асосӣ", "status": "pending_review"},
+    {"key": "tab_vocabulary", "ru": "Словарь", "tg_draft": "Луғат", "status": "pending_review"},
+    {"key": "tab_languages", "ru": "Языки", "tg_draft": "Забонҳо", "status": "pending_review"},
+    {"key": "tab_practice", "ru": "Практика", "tg_draft": "Амалия", "status": "pending_review"},
+    {"key": "tab_profile", "ru": "Профиль", "tg_draft": "Профил", "status": "pending_review"},
+    {"key": "community_arena_hub", "ru": "Сообщество и Арена", "tg_draft": "Ҷомеа ва Арена", "status": "pending_review"},
+    {"key": "notification_channel_name", "ru": "Напоминания о повторении", "tg_draft": "Ёдоварӣ барои такрор", "status": "pending_review"},
+    {"key": "notification_channel_desc", "ru": "Уведомления о терминах, готовых к интервальному повторению SM-2", "tg_draft": "Огоҳиномаҳо оид ба истилоҳоте, ки барои такрори фосилавии SM-2 омодаанд", "status": "pending_review"},
+    {"key": "srs_rate_again", "ru": "Не помню", "tg_draft": "Дар хотир надорам", "status": "pending_review"},
+    {"key": "srs_rate_hard", "ru": "Сложно", "tg_draft": "Душвор", "status": "pending_review"},
+    {"key": "srs_rate_good", "ru": "Хорошо", "tg_draft": "Хуб", "status": "pending_review"},
+    {"key": "srs_rate_easy", "ru": "Легко", "tg_draft": "Осон", "status": "pending_review"},
+    {"key": "offline_mode_banner", "ru": "Офлайн-режим", "tg_draft": "Ҳолати офлайн", "status": "pending_review"},
+    {"key": "sync_now", "ru": "Синхронизировать", "tg_draft": "Ҳамоҳангсозӣ", "status": "pending_review"},
+    {"key": "settings_title", "ru": "Профиль и настройки", "tg_draft": "Профил ва танзимот", "status": "pending_review"},
+    {"key": "daily_goal", "ru": "Ежедневная цель", "tg_draft": "Ҳадафи рӯзона", "status": "pending_review"},
+    {"key": "search_hint", "ru": "Поиск терминов…", "tg_draft": "Ҷустуҷӯи истилоҳот…", "status": "pending_review"},
+    {"key": "voice_record_hint", "ru": "Записать голос (≤ 20 с)", "tg_draft": "Сабти овоз (≤ 20 сония)", "status": "pending_review"}
+  ]
+}

@@ -1,0 +1,4 @@
+-r requirements.txt
+fakeredis==2.26.2
+moto[s3]==5.0.26
+cryptography==44.0.2

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SP3-03 / R7: Tajik (tg) resource bucket gated by BuildConfig.TAJIK_UI_LOCALIZATION_ENABLED.
+  Draft UI translations live in docs/tg_review/ui_strings_tg_draft.json (status=pending_review).
+  Only human-verified strings may replace RU fallback values below after owner approval.
+-->
+<resources>
+    <string name="app_name">TechEnglish</string>
+    <string name="app_subtitle">Technical English for Developers</string>
+    <string name="notification_channel_name">Напоминания о повторении</string>
+    <string name="notification_channel_desc">Уведомления о терминах, готовых к интервальному повторению SM-2</string>
+</resources>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TechEnglish</string>
+    <string name="app_subtitle">Technical English for Developers</string>
+    <string name="notification_channel_name">Напоминания о повторении</string>
+    <string name="notification_channel_desc">Уведомления о терминах, готовых к интервальному повторению SM-2</string>
+</resources>

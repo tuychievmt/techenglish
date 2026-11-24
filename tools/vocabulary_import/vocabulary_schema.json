@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TechEnglish Academic Technical Vocabulary Schema",
+  "description": "Validation schema for academic and deep technical English terms (10,000+ to 50,000+ scalable corpus).",
+  "type": "object",
+  "required": [
+    "id",
+    "term",
+    "normalized_term",
+    "part_of_speech",
+    "translation_ru",
+    "definition_en",
+    "definition_ru",
+    "academic_explanation_en",
+    "academic_explanation_ru",
+    "practical_explanation",
+    "example_en",
+    "example_ru",
+    "major_category",
+    "domain",
+    "subdomain",
+    "difficulty_level",
+    "cefr_level",
+    "verification_status",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "id": { "type": "integer", "minimum": 1 },
+    "term": { "type": "string", "minLength": 2, "maxLength": 160 },
+    "normalized_term": { "type": "string", "minLength": 2, "maxLength": 160 },
+    "phonetic_transcription": { "type": "string" },
+    "part_of_speech": {
+      "type": "string",
+      "enum": ["noun", "noun phrase", "verb", "adjective", "adverb", "abbreviation"]
+    },
+    "translation_ru": { "type": "string", "minLength": 2 },
+    "translation_tg": { "type": "string" },
+    "definition_en": { "type": "string", "minLength": 20 },
+    "definition_ru": { "type": "string", "minLength": 20 },
+    "academic_explanation_en": { "type": "string", "minLength": 20 },
+    "academic_explanation_ru": { "type": "string", "minLength": 20 },
+    "practical_explanation": { "type": "string", "minLength": 15 },
+    "example_en": { "type": "string", "minLength": 15 },
+    "example_ru": { "type": "string", "minLength": 15 },
+    "major_category": {
+      "type": "string",
+      "enum": [
+        "Machine Learning & Artificial Intelligence",
+        "Cryptography & Cybersecurity",
+        "Low-Level Programming & Computer Architecture",
+        "Hardware Engineering & Digital Electronics",
+        "Algorithms & Theoretical Computer Science",
+        "Databases & Distributed Systems",
+        "Networking & Protocol Engineering",
+        "Software Engineering & Compiler Technology",
+        "Mathematics & Scientific Computing",
+        "Advanced Documentation & Research Vocabulary"
+      ]
+    },
+    "domain": { "type": "string", "minLength": 2 },
+    "subdomain": { "type": "string", "minLength": 2 },
+    "difficulty_level": {
+      "type": "string",
+      "enum": ["Beginner", "Intermediate", "Advanced", "Expert", "Research Level"]
+    },
+    "cefr_level": {
+      "type": "string",
+      "enum": ["A2", "B1", "B2", "C1", "C2"]
+    },
+    "synonyms": { "type": "string" },
+    "related_terms": { "type": "string" },
+    "abbreviations": { "type": "string" },
+    "source_reference": { "type": "string" },
+    "source_id": { "type": ["integer", "null"] },
+    "verification_status": {
+      "type": "string",
+      "enum": ["draft", "pending_review", "verified", "rejected", "needs_revision"]
+    },
+    "created_at": { "type": "integer" },
+    "updated_at": { "type": "integer" }
+  }
+}

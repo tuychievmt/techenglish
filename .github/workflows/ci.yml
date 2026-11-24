@@ -1,0 +1,186 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "remediation/**"
+  pull_request:
+    branches:
+      - main
+      - "remediation/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Android (:domain + JaCoCo >= 90% + :app)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle with cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure gradlew is executable
+        run: chmod +x ./gradlew
+
+      - name: Run :domain tests and JaCoCo >= 90% gate
+        run: >
+          ./gradlew
+          :domain:cleanTest
+          :domain:test
+          :domain:jacocoTestReport
+          :domain:jacocoTestCoverageVerification
+          --no-daemon
+          --stacktrace
+
+      - name: Verify JaCoCo XML, CSV, and HTML consistency
+        run: |
+          python3 - <<'PY'
+          import csv
+          import pathlib
+          import re
+          import xml.etree.ElementTree as ET
+
+          base = pathlib.Path("domain/build/reports/jacoco/test")
+          xml_path = base / "jacocoTestReport.xml"
+          csv_path = base / "jacocoTestReport.csv"
+          html_path = base / "html/index.html"
+
+          for p in (xml_path, csv_path, html_path):
+              assert p.exists(), f"Missing JaCoCo report: {p}"
+
+          root = ET.parse(xml_path).getroot()
+          xml_counters = {
+              c.attrib["type"]: (int(c.attrib["covered"]), int(c.attrib["missed"]))
+              for c in root.findall("counter")
+          }
+          line_cov, line_mis = xml_counters["LINE"]
+          line_total = line_cov + line_mis
+          line_pct = line_cov / line_total * 100.0
+          print(f":domain JaCoCo LINE coverage: {line_cov}/{line_total} ({line_pct:.2f}%)")
+          assert line_pct >= 90.0, f"Coverage below 90%: {line_pct:.2f}%"
+
+          with csv_path.open() as f:
+              rows = list(csv.DictReader(f))
+          csv_instr = (
+              sum(int(r["INSTRUCTION_COVERED"]) for r in rows),
+              sum(int(r["INSTRUCTION_MISSED"]) for r in rows),
+          )
+          csv_branch = (
+              sum(int(r["BRANCH_COVERED"]) for r in rows),
+              sum(int(r["BRANCH_MISSED"]) for r in rows),
+          )
+          assert csv_instr == xml_counters["INSTRUCTION"], (
+              f"CSV/XML INSTRUCTION mismatch: {csv_instr} vs {xml_counters['INSTRUCTION']}"
+          )
+          assert csv_branch == xml_counters["BRANCH"], (
+              f"CSV/XML BRANCH mismatch: {csv_branch} vs {xml_counters['BRANCH']}"
+          )
+
+          html_text = html_path.read_text(encoding="utf-8")
+          tfoot = re.search(r"<tfoot>.*?</tfoot>", html_text, re.S)
+          assert tfoot is not None, "Missing <tfoot> in JaCoCo HTML report"
+          cells = [re.sub(r"\s+", "", c) for c in re.findall(r"<td[^>]*>(.*?)</td>", tfoot.group(0))]
+          assert cells[7] == str(line_mis) and cells[8] == str(line_total), (
+              f"HTML/XML LINE mismatch: html={cells[7]}/{cells[8]} vs xml={line_mis}/{line_total}"
+          )
+          PY
+
+      - name: Run :app debug unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Upload test, JaCoCo & Compose stability reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-reports
+          path: |
+            domain/build/reports/jacoco/test/
+            domain/build/reports/tests/test/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/compose_compiler/
+          retention-days: 14
+
+  backend:
+    name: Backend (PostgreSQL 16 + Redis 7 + Alembic + pytest + Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: techenglish_ci
+          POSTGRES_USER: techenglish_ci
+          POSTGRES_PASSWORD: ci_ephemeral_pg_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U techenglish_ci -d techenglish_ci"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -r backend/requirements-dev.txt
+
+      - name: Verify Alembic migrations on PostgreSQL 16
+        working-directory: backend
+        env:
+          ENV: prod
+          DATABASE_URL: postgresql+psycopg://techenglish_ci:ci_ephemeral_pg_password@localhost:5432/techenglish_ci
+        run: alembic upgrade head
+
+      - name: Run backend pytest suite
+        working-directory: backend
+        env:
+          ENV: test
+          DATABASE_URL: postgresql+psycopg://techenglish_ci:ci_ephemeral_pg_password@localhost:5432/techenglish_ci
+          REDIS_URL: redis://localhost:6379/0
+          PLAY_INTEGRITY_STRICT: "false"
+          JWT_SECRET: ci-ephemeral-jwt-secret-key-min-32-chars
+        run: pytest -v --tb=short
+
+      - name: Validate and build Docker Compose images
+        working-directory: backend
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: |
+          docker compose config --quiet
+          docker compose build
