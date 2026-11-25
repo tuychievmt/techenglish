@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terms of Service — TechEnglish</title>
+  <meta name="description" content="Terms of Service for TechEnglish mobile application and educational services.">
+  <meta name="theme-color" content="#0a0e17">
+
+  <style>
+    :root {
+      --bg-dark: #0a0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #162032;
+      --bg-glass: rgba(17, 24, 39, 0.75);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-highlight: rgba(99, 102, 241, 0.3);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent-blue: #3b82f6;
+      --accent-indigo: #6366f1;
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+      --gradient-glow: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.12) 0%, transparent 70%);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      line-height: 1.7;
+      background-image: var(--gradient-glow);
+      background-attachment: fixed;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a {
+      color: var(--accent-blue);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    a:hover {
+      color: var(--accent-cyan);
+    }
+
+    .container {
+      width: 100%;
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Header / Nav */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg-glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .nav-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 72px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+    }
+
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      background: var(--gradient-primary);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
+
+    .nav-links a:hover, .nav-links a.active {
+      color: var(--text-main);
+    }
+
+    /* Terms Content */
+    .terms-wrapper {
+      padding: 60px 0 80px;
+    }
+
+    .terms-header {
+      margin-bottom: 40px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .terms-badge {
+      display: inline-block;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .effective-date {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+    }
+
+    .terms-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 40px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .terms-card section {
+      margin-bottom: 36px;
+    }
+
+    .terms-card section:last-child {
+      margin-bottom: 0;
+    }
+
+    h2 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 14px;
+      letter-spacing: -0.01em;
+    }
+
+    p {
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      font-size: 1rem;
+    }
+
+    ul {
+      color: var(--text-muted);
+      padding-left: 24px;
+      margin-bottom: 16px;
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    li strong {
+      color: #f1f5f9;
+    }
+
+    .contact-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-top: 20px;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-color);
+      background: #080c14;
+      padding: 40px 0 30px;
+      margin-top: auto;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      list-style: none;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+    }
+
+    .footer-links a:hover {
+      color: var(--text-main);
+    }
+
+    @media (max-width: 640px) {
+      .terms-card {
+        padding: 24px 18px;
+      }
+      .nav-links {
+        gap: 14px;
+      }
+      .footer-content {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation Header -->
+  <header>
+    <div class="container nav-wrapper">
+      <a href="index.html" class="logo">
+        <div class="logo-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <span>TechEnglish</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html" class="active">Terms of Service</a></li>
+      </ul>
+    </div>
+  </header>
+
+  <!-- Terms Content -->
+  <main class="terms-wrapper">
+    <div class="container">
+      <div class="terms-header">
+        <span class="terms-badge">Legal Agreement</span>
+        <h1>Terms of Service</h1>
+        <p class="effective-date">Effective Date: November 25, 2026 &bull; Application: TechEnglish</p>
+      </div>
+
+      <div class="terms-card">
+        <!-- Acceptance -->
+        <section>
+          <h2>1. Acceptance of Terms</h2>
+          <p>
+            By downloading, installing, accessing, or using the <strong>TechEnglish</strong> mobile application, website, or backend services, you agree to be legally bound by these Terms of Service (&ldquo;Terms&rdquo;). If you do not agree to these Terms, please do not access or use TechEnglish.
+          </p>
+        </section>
+
+        <!-- Service Description -->
+        <section>
+          <h2>2. Description of the Service</h2>
+          <p>
+            TechEnglish is an educational software platform built for software developers, engineers, and IT professionals to improve their technical English vocabulary, comprehension, and workplace communication skills. The service provides:
+          </p>
+          <ul>
+            <li>Spaced repetition flashcards (SM-2 algorithm) and technical vocabulary databases.</li>
+            <li>Programming language catalogs, syntax breakdown, and cross-language comparisons.</li>
+            <li>Technical documentation reader with instant contextual lookup.</li>
+            <li>Interactive workplace communication scenarios and technical interview preparation.</li>
+            <li>Optional cloud synchronization of learning progress and offline-first client functionality.</li>
+          </ul>
+        </section>
+
+        <!-- User Accounts & Authentication -->
+        <section>
+          <h2>3. User Accounts & Registration</h2>
+          <p>
+            You may use the core educational modules of TechEnglish as a guest without creating an account (offline-first mode). To enable cloud synchronization across multiple devices, you may register an account using supported third-party identity providers (Google OAuth or GitHub OAuth) or via email authentication.
+          </p>
+          <ul>
+            <li>You agree to provide accurate and truthful information during registration.</li>
+            <li>You are responsible for maintaining the security of your device and authentication credentials.</li>
+            <li>You are responsible for all activities that occur under your registered account.</li>
+          </ul>
+        </section>
+
+        <!-- Acceptable Use -->
+        <section>
+          <h2>4. Acceptable Use Policy</h2>
+          <p>You agree to use TechEnglish only for lawful educational purposes. You agree not to:</p>
+          <ul>
+            <li>Disrupt, compromise, overload, or reverse engineer backend APIs or infrastructure.</li>
+            <li>Bypass authentication mechanisms, access controls, or rate limits.</li>
+            <li>Upload abusive, defamatory, harassing, or illegal content, including inappropriate audio recordings in peer review modules.</li>
+            <li>Scrape or mass-extract backend proprietary data without explicit written permission.</li>
+          </ul>
+          <p>
+            Violation of these rules may result in immediate suspension or termination of your account.
+          </p>
+        </section>
+
+        <!-- Intellectual Property -->
+        <section>
+          <h2>5. Intellectual Property Rights</h2>
+          <p>
+            The TechEnglish software, brand name, logo, original educational material, and visual design are the intellectual property of the developer and contributors, subject to the open-source license specified in the project&rsquo;s GitHub repository.
+          </p>
+          <p>
+            You retain ownership of any custom vocabulary words or notes that you create within the app. By creating custom content, you grant TechEnglish a non-exclusive license to store and synchronize such content solely to provide the service to you.
+          </p>
+        </section>
+
+        <!-- Third-Party Services -->
+        <section>
+          <h2>6. Third-Party Integrations</h2>
+          <p>
+            TechEnglish interacts with third-party authentication and API providers, including Google OAuth, GitHub OAuth, and Google Gemini API. Your use of these third-party features is subject to the respective third-party terms of service and privacy policies. TechEnglish is not responsible for the availability or conduct of third-party services.
+          </p>
+        </section>
+
+        <!-- Disclaimers -->
+        <section>
+          <h2>7. Disclaimer of Warranties</h2>
+          <p>
+            TechEnglish is provided on an <strong>&ldquo;AS IS&rdquo;</strong> and <strong>&ldquo;AS AVAILABLE&rdquo;</strong> basis without warranties of any kind, whether express, implied, or statutory, including but not limited to implied warranties of merchantability, fitness for a particular purpose, and non-infringement.
+          </p>
+          <p>
+            While we strive for accurate, high-quality technical translations and explanations, we do not warrant that all translations, definitions, or code examples are entirely error-free.
+          </p>
+        </section>
+
+        <!-- Limitation of Liability -->
+        <section>
+          <h2>8. Limitation of Liability</h2>
+          <p>
+            To the maximum extent permitted by applicable law, in no event shall TechEnglish or its developers be liable for any indirect, incidental, special, consequential, or punitive damages, including loss of data, loss of goodwill, or service interruption, arising out of or related to your use of or inability to use the service.
+          </p>
+        </section>
+
+        <!-- Termination & Account Deletion -->
+        <section>
+          <h2>9. Termination</h2>
+          <p>
+            You may terminate these Terms at any time by deleting your account inside the app or by uninstalling the application. We reserve the right to suspend or terminate accounts that violate these Terms or threaten platform integrity.
+          </p>
+        </section>
+
+        <!-- Modifications -->
+        <section>
+          <h2>10. Modifications to Terms</h2>
+          <p>
+            We may revise these Terms of Service periodically. Any updates will be published on this page with an updated &ldquo;Effective Date&rdquo;. Your continued use of TechEnglish after such modifications constitutes acceptance of the new Terms.
+          </p>
+        </section>
+
+        <!-- Contact Information -->
+        <section>
+          <h2>11. Contact Information</h2>
+          <p>For questions or notices regarding these Terms of Service, please contact:</p>
+          <div class="contact-card">
+            <p><strong>Developer:</strong> Mukhammadsaid Tuychiev</p>
+            <p><strong>Email:</strong> <a href="mailto:fvacking@gmail.com">fvacking@gmail.com</a></p>
+            <p><strong>GitHub Repository:</strong> <a href="https://github.com/tuychievmt/techenglish" target="_blank" rel="noopener noreferrer">https://github.com/tuychievmt/techenglish</a></p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <p>&copy; 2026 TechEnglish. All rights reserved.</p>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms of Service</a></li>
+        <li><a href="mailto:fvacking@gmail.com">Support</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>

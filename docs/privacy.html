@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — TechEnglish</title>
+  <meta name="description" content="Privacy Policy for TechEnglish mobile application and services, detailing data collection, Google OAuth usage, offline storage, and user privacy rights.">
+  <meta name="theme-color" content="#0a0e17">
+
+  <style>
+    :root {
+      --bg-dark: #0a0e17;
+      --bg-card: #111827;
+      --bg-card-hover: #162032;
+      --bg-glass: rgba(17, 24, 39, 0.75);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --border-highlight: rgba(99, 102, 241, 0.3);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent-blue: #3b82f6;
+      --accent-indigo: #6366f1;
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+      --gradient-glow: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.12) 0%, transparent 70%);
+      --radius-sm: 8px;
+      --radius-md: 14px;
+      --radius-lg: 20px;
+      --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      line-height: 1.7;
+      background-image: var(--gradient-glow);
+      background-attachment: fixed;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    a {
+      color: var(--accent-blue);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    a:hover {
+      color: var(--accent-cyan);
+    }
+
+    .container {
+      width: 100%;
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* Header / Nav */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg-glass);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .nav-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 72px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+    }
+
+    .logo-icon {
+      width: 38px;
+      height: 38px;
+      background: var(--gradient-primary);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      font-weight: 500;
+    }
+
+    .nav-links a:hover, .nav-links a.active {
+      color: var(--text-main);
+    }
+
+    /* Policy Content */
+    .policy-wrapper {
+      padding: 60px 0 80px;
+    }
+
+    .policy-header {
+      margin-bottom: 40px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .policy-badge {
+      display: inline-block;
+      text-transform: uppercase;
+      font-size: 0.75rem;
+      letter-spacing: 0.1em;
+      font-weight: 700;
+      color: var(--accent-cyan);
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4vw, 2.8rem);
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .effective-date {
+      color: var(--text-dim);
+      font-size: 0.95rem;
+    }
+
+    .policy-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 40px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .policy-card section {
+      margin-bottom: 36px;
+    }
+
+    .policy-card section:last-child {
+      margin-bottom: 0;
+    }
+
+    h2 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: #ffffff;
+      margin-bottom: 14px;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #e2e8f0;
+      margin: 18px 0 8px;
+    }
+
+    p {
+      color: var(--text-muted);
+      margin-bottom: 14px;
+      font-size: 1rem;
+    }
+
+    ul, ol {
+      color: var(--text-muted);
+      padding-left: 24px;
+      margin-bottom: 16px;
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    li strong {
+      color: #f1f5f9;
+    }
+
+    /* Highlight box / Callout */
+    .callout {
+      background: rgba(99, 102, 241, 0.08);
+      border: 1px solid var(--border-highlight);
+      border-left: 4px solid var(--accent-indigo);
+      border-radius: var(--radius-sm);
+      padding: 20px 24px;
+      margin: 24px 0;
+    }
+
+    .callout h4 {
+      color: #c7d2fe;
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+    }
+
+    .callout p {
+      color: #cbd5e1;
+      margin-bottom: 0;
+      font-size: 0.95rem;
+    }
+
+    .contact-card {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 24px;
+      margin-top: 20px;
+    }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border-color);
+      background: #080c14;
+      padding: 40px 0 30px;
+      margin-top: auto;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .footer-content {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 20px;
+      list-style: none;
+    }
+
+    .footer-links a {
+      color: var(--text-muted);
+    }
+
+    .footer-links a:hover {
+      color: var(--text-main);
+    }
+
+    @media (max-width: 640px) {
+      .policy-card {
+        padding: 24px 18px;
+      }
+      .nav-links {
+        gap: 14px;
+      }
+      .footer-content {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Navigation Header -->
+  <header>
+    <div class="container nav-wrapper">
+      <a href="index.html" class="logo">
+        <div class="logo-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <span>TechEnglish</span>
+      </a>
+
+      <ul class="nav-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="privacy.html" class="active">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms of Service</a></li>
+      </ul>
+    </div>
+  </header>
+
+  <!-- Privacy Policy Content -->
+  <main class="policy-wrapper">
+    <div class="container">
+      <div class="policy-header">
+        <span class="policy-badge">Legal & Transparency</span>
+        <h1>Privacy Policy</h1>
+        <p class="effective-date">Effective Date: November 25, 2026 &bull; Application: TechEnglish (com.techenglish.app)</p>
+      </div>
+
+      <div class="policy-card">
+        <!-- Overview -->
+        <section>
+          <h2>1. Introduction & Overview</h2>
+          <p>
+            TechEnglish (&ldquo;we&rdquo;, &ldquo;our&rdquo;, or &ldquo;us&rdquo;), developed by <strong>Mukhammadsaid Tuychiev</strong> (<a href="mailto:fvacking@gmail.com">fvacking@gmail.com</a>), is an educational mobile and backend platform designed to help software engineers and IT professionals master technical English.
+          </p>
+          <p>
+            We respect your privacy and are committed to protecting the information you share with us. This Privacy Policy outlines what information is collected, how it is used, how your data is stored securely, and how you can manage or delete your data at any time.
+          </p>
+        </section>
+
+        <!-- Information Collected -->
+        <section>
+          <h2>2. Information We Collect</h2>
+          <p>We believe in data minimization. We only collect the minimal data necessary to provide and synchronize your learning experience:</p>
+
+          <h3>A. Authentication Data (Google & GitHub OAuth)</h3>
+          <p>
+            When you sign in using <strong>Google OAuth</strong> or <strong>GitHub OAuth</strong>, we request access only to your basic, non-sensitive identity information:
+          </p>
+          <ul>
+            <li><strong>Email address:</strong> Used as your unique account identifier and for account-related notices.</li>
+            <li><strong>Display name / Full name:</strong> Used to display your profile in the application.</li>
+            <li><strong>Profile picture URL (Avatar):</strong> Used to display your avatar within your in-app profile.</li>
+            <li><strong>OAuth provider subject ID:</strong> A technical identifier used to verify your authentication token.</li>
+          </ul>
+          <p>
+            <em>We do not request or have access to your contacts, emails, calendar, Google Drive files, or passwords.</em>
+          </p>
+
+          <h3>B. Learning Progress & Activity Data</h3>
+          <p>
+            To provide cross-device synchronization and spaced repetition learning, the following educational data is synchronized with our secure backend when you are logged in:
+          </p>
+          <ul>
+            <li>Spaced repetition schedules and review intervals (SuperMemo-2 SM-2 data).</li>
+            <li>Completed work scenarios, reading progress in technical articles, and quiz scores.</li>
+            <li>Custom vocabulary words, favorite cards, and personal notes added by you.</li>
+            <li>Learning statistics: study streaks, daily learning targets, and earned XP level.</li>
+          </ul>
+
+          <h3>C. Offline-First & Local Storage</h3>
+          <p>
+            TechEnglish is built from the ground up as an <strong>offline-first application</strong>. When using the app in guest mode or without an internet connection, all vocabulary flashcards, reading articles, and study progress are stored exclusively on your local device in an encrypted Room SQLite database. Local data is never transmitted to our servers unless you explicitly sign in and initiate cloud synchronization.
+          </p>
+
+          <h3>D. Optional Audio Data (Peer Review)</h3>
+          <p>
+            If you optionally choose to participate in pronunciation peer review, short voice recordings (up to 20 seconds) are stored in secure object storage with an automated <strong>30-day Time-To-Live (TTL)</strong> expiration, after which they are permanently and irreversibly purged. Standard offline pronunciation practice and Text-to-Speech (TTS) run entirely on your device with zero data retention.
+          </p>
+        </section>
+
+        <!-- Google OAuth Limited Use -->
+        <section>
+          <h2>3. Google API Services User Data Policy (Limited Use Disclosure)</h2>
+          <div class="callout">
+            <h4>Google OAuth Limited Use Compliance</h4>
+            <p>
+              TechEnglish's use and transfer of information received from Google APIs to any other app will adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer" style="text-decoration: underline; color: #a5b4fc;">Google API Services User Data Policy</a>, including the Limited Use requirements.
+            </p>
+          </div>
+          <p>Specifically:</p>
+          <ul>
+            <li>We <strong>do not sell</strong> your Google user data to any third party.</li>
+            <li>We <strong>do not use or transfer</strong> your Google user data for serving advertisements, retargeting, or personalized advertising.</li>
+            <li>We <strong>do not use</strong> your personal data to train machine learning models without your explicit prior consent.</li>
+            <li>Human access to user data is strictly prohibited, except where required by law or to resolve security incidents upon your explicit request.</li>
+          </ul>
+        </section>
+
+        <!-- AI Features -->
+        <section>
+          <h2>4. AI-Assisted Features & Privacy</h2>
+          <p>
+            TechEnglish offers optional AI-assisted learning capabilities (such as contextual grammar clarifications, code explanation breakdowns, and technical term nuances) powered by Google Gemini API:
+          </p>
+          <ul>
+            <li><strong>Automated PII Sanitization:</strong> Before any educational query is transmitted to the AI proxy, personal identifying information (such as names, email addresses, and phone numbers) is automatically stripped by our backend sanitizer.</li>
+            <li><strong>No Model Training:</strong> Educational queries submitted to the AI proxy are processed in real time and are not used by us to train or fine-tune generalized machine learning models.</li>
+          </ul>
+        </section>
+
+        <!-- Data Sharing -->
+        <section>
+          <h2>5. Data Sharing & Third-Party Services</h2>
+          <p>
+            We do not sell, rent, or lease your personal information. We only share data with essential infrastructure providers strictly required for application operation:
+          </p>
+          <ul>
+            <li><strong>Authentication Providers (Google & GitHub):</strong> To securely verify your identity via OAuth 2.0.</li>
+            <li><strong>Cloud Hosting & Database:</strong> Encrypted backend services and databases running in secure data centers to manage user accounts and cloud synchronization.</li>
+          </ul>
+        </section>
+
+        <!-- Security -->
+        <section>
+          <h2>6. Data Security & Encryption</h2>
+          <p>We employ robust security measures to protect your information:</p>
+          <ul>
+            <li><strong>Encryption in Transit:</strong> All communications between the mobile application and backend APIs are strictly encrypted using TLS 1.2 / TLS 1.3 with cleartext traffic disabled.</li>
+            <li><strong>Encryption at Rest:</strong> Authentication tokens on Android devices are protected using the Android Keystore system with AES-256-GCM hardware-backed cryptography.</li>
+            <li><strong>Role-Based Access:</strong> Access to backend server infrastructure is restricted to authorized administrative personnel with multi-factor authentication.</li>
+          </ul>
+        </section>
+
+        <!-- Retention and Deletion -->
+        <section>
+          <h2>7. Data Retention & Account Deletion</h2>
+          <p>
+            We retain your data only for as long as your account is active. You have full control over your personal data at all times:
+          </p>
+          <ul>
+            <li><strong>In-App Deletion:</strong> You can permanently delete your account and all associated cloud data directly inside the TechEnglish app under <code>Profile &rarr; Account Settings &rarr; Delete Account</code>.</li>
+            <li><strong>Web Deletion Request:</strong> You may also request account and data deletion by emailing the developer at <a href="mailto:fvacking@gmail.com">fvacking@gmail.com</a> with the subject &ldquo;Data Deletion Request&rdquo;.</li>
+          </ul>
+          <p>
+            Upon receiving an account deletion request, your account record, learning history, custom vocabulary, and stored tokens are permanently deleted from our primary databases within 48 hours.
+          </p>
+        </section>
+
+        <!-- Children's Privacy -->
+        <section>
+          <h2>8. Children's Privacy</h2>
+          <p>
+            TechEnglish is intended for software developers and adult learners aged 16 and older. We do not knowingly collect personal information from individuals under the age of 16. If we become aware that personal data of a minor has been collected without verifiable parental consent, we will take immediate steps to remove such data.
+          </p>
+        </section>
+
+        <!-- Changes -->
+        <section>
+          <h2>9. Changes to This Privacy Policy</h2>
+          <p>
+            We may update this Privacy Policy from time to time to reflect improvements to our app or changes in legal regulations. When updates occur, the &ldquo;Effective Date&rdquo; at the top of this document will be updated. Continued use of the service following such changes constitutes acceptance of the updated policy.
+          </p>
+        </section>
+
+        <!-- Contact -->
+        <section>
+          <h2>10. Contact Us</h2>
+          <p>
+            If you have questions, feedback, or data privacy requests regarding this Privacy Policy, please contact the developer:
+          </p>
+          <div class="contact-card">
+            <p><strong>Developer:</strong> Mukhammadsaid Tuychiev</p>
+            <p><strong>Email:</strong> <a href="mailto:fvacking@gmail.com">fvacking@gmail.com</a></p>
+            <p><strong>Project Repository:</strong> <a href="https://github.com/tuychievmt/techenglish" target="_blank" rel="noopener noreferrer">https://github.com/tuychievmt/techenglish</a></p>
+            <p><strong>Website:</strong> <a href="https://tuychievmt.github.io/techenglish/">https://tuychievmt.github.io/techenglish/</a></p>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container footer-content">
+      <p>&copy; 2026 TechEnglish. All rights reserved.</p>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="privacy.html">Privacy Policy</a></li>
+        <li><a href="terms.html">Terms of Service</a></li>
+        <li><a href="mailto:fvacking@gmail.com">Support</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
