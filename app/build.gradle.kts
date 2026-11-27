@@ -47,8 +47,8 @@ android {
         applicationId = "com.techenglish.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 310
-        versionName = "3.1.0"
+        versionCode = 320
+        versionName = "3.2.0"
 
         val crashReportingEnabled = (System.getenv("CRASH_REPORTING_ENABLED") ?: "false").toBoolean()
         val sentryDsn = (System.getenv("SENTRY_DSN") ?: "").replace("\"", "\\\"")

@@ -1,9 +1,9 @@
 {
-  "latest_version_code": 310,
-  "latest_version_name": "3.1.0",
-  "min_supported_version_code": 310,
+  "latest_version_code": 320,
+  "latest_version_name": "3.2.0",
+  "min_supported_version_code": 320,
   "force_update": false,
-  "apk_url": "https://github.com/tuychievmt/techenglish/releases/latest/download/app-standalone-release.apk",
-  "apk_sha256": "",
-  "changelog_ru": "• Обновлён интерфейс Obsidian Aurora и Ceramic Glass\n• Улучшена стабильность синхронизации и офлайн-словаря\n• Добавлена встроенная система проверки и установки обновлений"
+  "apk_url": "https://github.com/tuychievmt/techenglish/releases/download/v3.2.0/app-standalone-release.apk",
+  "apk_sha256": "fc6708f32ee6ff84547c82783aeb58291b305c40a0fb1094d8673bdd585b2e5a",
+  "changelog_ru": "• Новый дизайн Obsidian Aurora и Ceramic Glass\n• Стартовый вход Google/GitHub и настройка @username\n• Исправления AI-ментора, PvP-дуэли, Split-кода и словаря"
 }
