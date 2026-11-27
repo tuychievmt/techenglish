@@ -38,7 +38,9 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -46,6 +48,8 @@ import javax.inject.Inject
 // =========================================================================
 // 1. AI Mock Interviewer & AI Code/PR Reviewer ViewModel (ФТ-8.1–8.3)
 // =========================================================================
+
+const val AI_MENTOR_MIN_CHARS = 3
 
 data class AiMentorUiState(
     val consentAccepted: Boolean = false,
@@ -58,7 +62,10 @@ data class AiMentorUiState(
     val remainingDailyQuota: Int = 15,
     val dailyLimit: Int = 15,
     val isOffline: Boolean = false,
-    val isBusy: Boolean = false
+    val isBusy: Boolean = false,
+    val errorMessage: String? = null,
+    val interviewSubmitSuccessSeq: Int = 0,
+    val prSubmitSuccessSeq: Int = 0
 )
 
 @HiltViewModel
@@ -71,7 +78,7 @@ class AiMentorViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val internalState = MutableStateFlow(AiMentorUiState(isOffline = !apiClient.isNetworkAvailable()))
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     val uiState: StateFlow<AiMentorUiState> = combine(
@@ -79,7 +86,7 @@ class AiMentorViewModel @Inject constructor(
         settingsRepository.observeSettings()
     ) { local, settings ->
         local.copy(
-            consentAccepted = settings.aiConsentAccepted,
+            consentAccepted = local.consentAccepted || settings.aiConsentAccepted,
             isOffline = !apiClient.isNetworkAvailable()
         )
     }.stateIn(
@@ -92,8 +99,13 @@ class AiMentorViewModel @Inject constructor(
         refreshQuota()
     }
 
+    fun dismissError() {
+        internalState.update { it.copy(errorMessage = null) }
+    }
+
     fun acceptAiConsent() {
         viewModelScope.launch {
+            internalState.update { it.copy(consentAccepted = true, errorMessage = null) }
             updateSettings.setAiConsentAccepted(true)
             refreshQuota()
             _events.emit("Согласие сохранено. Текст очищается от PII, аудио не сохраняется.")
@@ -101,7 +113,7 @@ class AiMentorViewModel @Inject constructor(
     }
 
     fun selectTab(index: Int) {
-        internalState.value = internalState.value.copy(selectedTabIndex = index)
+        internalState.update { it.copy(selectedTabIndex = index, errorMessage = null) }
     }
 
     fun selectRole(role: AiInterviewRole) {
@@ -112,60 +124,70 @@ class AiMentorViewModel @Inject constructor(
             AiInterviewRole.DEVOPS_SRE -> "How do you structure a blameless postmortem after a production database outage?"
             AiInterviewRole.ML_AI -> "How do you detect and mitigate data drift and concept drift in production ML pipelines?"
         }
-        internalState.value = internalState.value.copy(role = role, currentQuestionEn = starterQ)
+        internalState.update { it.copy(role = role, currentQuestionEn = starterQ, errorMessage = null) }
     }
 
     fun selectLevel(level: AiInterviewLevel) {
-        internalState.value = internalState.value.copy(level = level)
+        internalState.update { it.copy(level = level, errorMessage = null) }
     }
 
     fun refreshQuota() {
         viewModelScope.launch {
             if (!apiClient.isNetworkAvailable() || tokenStore.getAccessToken().isNullOrBlank()) return@launch
             runCatching { apiClient.fetchAiQuota() }.onSuccess { q ->
-                internalState.value = internalState.value.copy(
-                    dailyLimit = q.dailyLimit,
-                    remainingDailyQuota = q.remainingToday
-                )
+                internalState.update {
+                    it.copy(
+                        dailyLimit = q.dailyLimit,
+                        remainingDailyQuota = q.remainingToday
+                    )
+                }
             }
         }
     }
 
+    private suspend fun reportError(msg: String) {
+        internalState.update { it.copy(isBusy = false, errorMessage = msg) }
+        _events.emit(msg)
+    }
+
     fun submitInterviewAnswer(rawAnswer: String) {
         viewModelScope.launch {
-            val state = uiState.value
-            if (!state.consentAccepted) {
-                _events.emit("Сначала подтвердите согласие на отправку обезличенного текста на AI-прокси.")
+            val current = internalState.value
+            val hasConsent = current.consentAccepted ||
+                uiState.value.consentAccepted ||
+                runCatching { settingsRepository.observeSettings().first().aiConsentAccepted }.getOrDefault(false)
+            if (!hasConsent) {
+                reportError("Сначала подтвердите согласие на отправку обезличенного текста на AI-прокси (ФТ-8.3).")
                 return@launch
             }
             val cleanText = sanitizePii(rawAnswer)
-            if (cleanText.length < 5) {
-                _events.emit("Введите ответ минимум из 5 символов (текстом или голосом).")
+            if (cleanText.length < AI_MENTOR_MIN_CHARS) {
+                reportError("Введите ответ минимум из $AI_MENTOR_MIN_CHARS символов (после очистки PII).")
                 return@launch
             }
             if (!apiClient.isNetworkAvailable()) {
-                _events.emit("Офлайн-режим: AI-собеседование работает через серверный прокси при наличии сети.")
+                reportError("Офлайн-режим: AI-собеседование работает через серверный прокси при наличии сети.")
                 return@launch
             }
             if (tokenStore.getAccessToken().isNullOrBlank()) {
-                _events.emit("Войдите в облачный аккаунт (Профиль → Аккаунт), чтобы использовать AI-прокси.")
+                reportError("Войдите в облачный аккаунт (Профиль → Облако и Sync), чтобы отправлять ответы AI-ментору.")
                 return@launch
             }
-            internalState.value = internalState.value.copy(isBusy = true)
-            runCatching {
+            internalState.update { it.copy(isBusy = true, errorMessage = null) }
+            try {
                 val res = apiClient.submitAiInterview(
                     AiInterviewRequestDto(
-                        role = state.role.apiKey,
-                        level = state.level.apiKey,
-                        questionEn = state.currentQuestionEn,
+                        role = current.role.apiKey,
+                        level = current.level.apiKey,
+                        questionEn = current.currentQuestionEn,
                         userAnswerText = cleanText,
-                        turnIndex = state.interviewTurns.size,
-                        consentAccepted = state.consentAccepted
+                        turnIndex = current.interviewTurns.size,
+                        consentAccepted = true
                     )
                 )
                 val turn = AiInterviewTurn(
                     id = UUID.randomUUID().toString(),
-                    questionEn = res.questionEn.ifBlank { state.currentQuestionEn },
+                    questionEn = res.questionEn.ifBlank { current.currentQuestionEn },
                     userAnswerEn = cleanText,
                     englishScore = res.englishScore,
                     technicalScore = res.technicalScore,
@@ -175,62 +197,95 @@ class AiMentorViewModel @Inject constructor(
                     isFallback = res.isFallback == true,
                     fallbackReason = res.fallbackReason
                 )
-                internalState.value = internalState.value.copy(
-                    interviewTurns = listOf(turn) + state.interviewTurns,
-                    currentQuestionEn = res.nextQuestionEn.ifBlank { state.currentQuestionEn },
-                    remainingDailyQuota = res.remainingDailyQuota
-                )
-            }.onFailure { err ->
-                _events.emit("AI-прокси недоступен или исчерпан дневной лимит: ${err.localizedMessage ?: "ошибка"}")
+                internalState.update { st ->
+                    st.copy(
+                        interviewTurns = listOf(turn) + st.interviewTurns,
+                        currentQuestionEn = res.nextQuestionEn.ifBlank { st.currentQuestionEn },
+                        remainingDailyQuota = res.remainingDailyQuota,
+                        errorMessage = null,
+                        interviewSubmitSuccessSeq = st.interviewSubmitSuccessSeq + 1
+                    )
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
+                val msg = when {
+                    err is com.techenglish.app.core.network.ApiHttpException && err.statusCode == 401 ->
+                        "Сессия истекла (401) — войдите повторно в Профиль → Облако и Sync."
+                    err is com.techenglish.app.core.network.ApiHttpException && err.statusCode == 429 ->
+                        "Дневной лимит AI-запросов исчерпан: ${err.detail}"
+                    err is com.techenglish.app.core.network.ApiHttpException -> err.detail
+                    else -> "AI-прокси недоступен или исчерпан лимит: ${err.localizedMessage ?: "ошибка соединения"}"
+                }
+                reportError(msg)
+            } finally {
+                internalState.update { it.copy(isBusy = false) }
             }
-            internalState.value = internalState.value.copy(isBusy = false)
         }
     }
 
     fun submitPrReview(rawDraft: String, context: String = "pull_request") {
         viewModelScope.launch {
-            val state = uiState.value
-            if (!state.consentAccepted) {
-                _events.emit("Сначала подтвердите согласие на отправку обезличенного текста на AI-прокси.")
+            val current = internalState.value
+            val hasConsent = current.consentAccepted ||
+                uiState.value.consentAccepted ||
+                runCatching { settingsRepository.observeSettings().first().aiConsentAccepted }.getOrDefault(false)
+            if (!hasConsent) {
+                reportError("Сначала подтвердите согласие на отправку обезличенного текста на AI-прокси (ФТ-8.3).")
                 return@launch
             }
             val cleanText = sanitizePii(rawDraft)
-            if (cleanText.length < 5) {
-                _events.emit("Введите текст PR-комментария или коммита (минимум 5 символов).")
+            if (cleanText.length < AI_MENTOR_MIN_CHARS) {
+                reportError("Введите текст PR-комментария или коммита (минимум $AI_MENTOR_MIN_CHARS символа).")
                 return@launch
             }
             if (!apiClient.isNetworkAvailable()) {
-                _events.emit("Офлайн-режим: AI Code/PR Reviewer требует подключения к серверному прокси.")
+                reportError("Офлайн-режим: AI Code/PR Reviewer требует подключения к серверному прокси.")
                 return@launch
             }
             if (tokenStore.getAccessToken().isNullOrBlank()) {
-                _events.emit("Войдите в облачный аккаунт, чтобы отправлять запросы к AI Code Reviewer.")
+                reportError("Войдите в облачный аккаунт (Профиль → Облако и Sync), чтобы использовать AI Code Reviewer.")
                 return@launch
             }
-            internalState.value = internalState.value.copy(isBusy = true)
-            runCatching {
+            internalState.update { it.copy(isBusy = true, errorMessage = null) }
+            try {
                 val res = apiClient.submitAiCodeReview(
                     AiCodeReviewRequestDto(
                         draftText = cleanText,
                         context = context,
-                        consentAccepted = state.consentAccepted
+                        consentAccepted = true
                     )
                 )
-                internalState.value = internalState.value.copy(
-                    prReviewFeedback = AiPrReviewFeedback(
-                        toneAssessmentRu = res.toneAssessmentRu,
-                        improvedEnglishText = res.improvedEnglishText,
-                        keySuggestionsRu = res.keySuggestionsRu,
+                internalState.update { st ->
+                    st.copy(
+                        prReviewFeedback = AiPrReviewFeedback(
+                            toneAssessmentRu = res.toneAssessmentRu,
+                            improvedEnglishText = res.improvedEnglishText,
+                            keySuggestionsRu = res.keySuggestionsRu,
+                            remainingDailyQuota = res.remainingDailyQuota,
+                            isFallback = res.isFallback == true,
+                            fallbackReason = res.fallbackReason
+                        ),
                         remainingDailyQuota = res.remainingDailyQuota,
-                        isFallback = res.isFallback == true,
-                        fallbackReason = res.fallbackReason
-                    ),
-                    remainingDailyQuota = res.remainingDailyQuota
-                )
-            }.onFailure { err ->
-                _events.emit("Ошибка AI Code Reviewer: ${err.localizedMessage ?: "проверьте лимит/сеть"}")
+                        errorMessage = null,
+                        prSubmitSuccessSeq = st.prSubmitSuccessSeq + 1
+                    )
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
+                val msg = when {
+                    err is com.techenglish.app.core.network.ApiHttpException && err.statusCode == 401 ->
+                        "Сессия истекла (401) — войдите повторно в Профиль → Облако и Sync."
+                    err is com.techenglish.app.core.network.ApiHttpException && err.statusCode == 429 ->
+                        "Дневной лимит AI-запросов исчерпан: ${err.detail}"
+                    err is com.techenglish.app.core.network.ApiHttpException -> err.detail
+                    else -> "Ошибка AI Code Reviewer: ${err.localizedMessage ?: "сервер недоступен или истёк таймаут"}"
+                }
+                reportError(msg)
+            } finally {
+                internalState.update { it.copy(isBusy = false) }
             }
-            internalState.value = internalState.value.copy(isBusy = false)
         }
     }
 }

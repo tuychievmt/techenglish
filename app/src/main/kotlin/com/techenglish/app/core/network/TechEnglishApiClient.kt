@@ -18,6 +18,7 @@ import io.ktor.client.plugins.auth.providers.BearerTokens
 import io.ktor.client.plugins.auth.providers.bearer
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.plugin
+import io.ktor.client.plugins.timeout
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.HttpRequestPipeline
@@ -26,21 +27,33 @@ import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
+import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.HttpResponse
+import io.ktor.client.statement.bodyAsChannel
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentLength
 import io.ktor.http.contentType
 import io.ktor.http.encodedPath
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.utils.io.readAvailable
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -149,12 +162,24 @@ data class SyncBatchBodyDto(
 )
 
 @Serializable
+data class RejectedSyncEventDto(
+    @SerialName("event_id") val eventId: String = "",
+    val reason: String = ""
+)
+
+@Serializable
 data class SyncBatchResponseDto(
     @SerialName("accepted_event_ids") val acceptedEventIds: List<String> = emptyList(),
     @SerialName("duplicate_event_ids") val duplicateEventIds: List<String> = emptyList(),
+    @SerialName("rejected_events") val rejectedEvents: List<RejectedSyncEventDto> = emptyList(),
     @SerialName("awarded_xp") val awardedXp: Int = 0,
     @SerialName("server_total_xp") val serverTotalXp: Int = 0
 )
+
+class ApiHttpException(val statusCode: Int, val detail: String) : Exception(detail)
+
+@Serializable
+private data class ApiErrorDetailDto(val detail: String = "")
 
 @Serializable
 data class LeaderboardRowDto(
@@ -231,6 +256,17 @@ data class OtaPackDownloadDto(
     @SerialName("pack_id") val packId: String,
     @SerialName("sha256_hex") val sha256Hex: String,
     @SerialName("payload_json") val payloadJson: String
+)
+
+@Serializable
+data class AppVersionMetadataDto(
+    @SerialName("latest_version_code") val latestVersionCode: Int = 0,
+    @SerialName("latest_version_name") val latestVersionName: String = "",
+    @SerialName("min_supported_version_code") val minSupportedVersionCode: Int = 0,
+    @SerialName("force_update") val forceUpdate: Boolean = false,
+    @SerialName("apk_url") val apkUrl: String = "",
+    @SerialName("apk_sha256") val apkSha256: String = "",
+    @SerialName("changelog_ru") val changelogRu: String = ""
 )
 
 @Serializable
@@ -671,12 +707,31 @@ class TechEnglishApiClient internal constructor(
             path.startsWith("/v1/auth/password-reset") ||
             path.startsWith("/v1/legal/") ||
             path.startsWith("/v1/ota/") ||
+            path == "/v1/app/version" ||
             path == "/v1/peer-review/daily-case" ||
             path == "/health"
     }
 
+    private val authCacheLock = Any()
+
     @Volatile
     private var cachedAccessTokenSnapshot: String? = null
+
+    private suspend fun HttpResponse.requireSuccess(): HttpResponse {
+        if (status.isSuccess()) return this
+        val rawBody = runCatching { bodyAsText() }.getOrDefault("")
+        val parsedDetail = runCatching {
+            if (rawBody.trimStart().startsWith("{")) {
+                jsonConfig.decodeFromString<ApiErrorDetailDto>(rawBody).detail.trim()
+            } else {
+                ""
+            }
+        }.getOrDefault("")
+        val message = parsedDetail.ifBlank {
+            rawBody.trim().take(200).ifBlank { "HTTP ${status.value}: ${status.description}" }
+        }
+        throw ApiHttpException(status.value, message)
+    }
 
     private suspend fun resolveBaseUrl(): String =
         tokenStore.getApiBaseUrl().ifBlank { DEFAULT_BASE_URL }.trimEnd('/')
@@ -688,6 +743,7 @@ class TechEnglishApiClient internal constructor(
                 readTimeout(READ_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 writeTimeout(WRITE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
                 callTimeout(CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                pingInterval(20, TimeUnit.SECONDS)
             }
         }
         val client = HttpClient(engine) {
@@ -699,13 +755,17 @@ class TechEnglishApiClient internal constructor(
             install(ContentNegotiation) {
                 json(jsonConfig)
             }
-            install(WebSockets)
+            install(WebSockets) {
+                pingInterval = 20_000L
+            }
             install(Auth) {
                 bearer {
                     loadTokens {
                         val access = tokenStore.getAccessToken()
                         val refresh = tokenStore.getRefreshToken()
-                        cachedAccessTokenSnapshot = access
+                        synchronized(authCacheLock) {
+                            cachedAccessTokenSnapshot = access
+                        }
                         if (!access.isNullOrBlank()) {
                             BearerTokens(accessToken = access, refreshToken = refresh.orEmpty())
                         } else {
@@ -713,30 +773,53 @@ class TechEnglishApiClient internal constructor(
                         }
                     }
                     refreshTokens {
-                        val refresh = oldTokens?.refreshToken?.takeIf { it.isNotBlank() }
-                            ?: tokenStore.getRefreshToken()?.takeIf { it.isNotBlank() }
+                        val refresh = tokenStore.getRefreshToken()?.takeIf { it.isNotBlank() }
+                            ?: oldTokens?.refreshToken?.takeIf { it.isNotBlank() }
                             ?: return@refreshTokens null
                         val base = resolveBaseUrl()
-                        val resp = runCatching {
+                        val resp = try {
                             client.post("$base/v1/auth/refresh") {
                                 markAsRefreshTokenRequest()
                                 contentType(ContentType.Application.Json)
                                 setBody(RefreshTokenBodyDto(refreshToken = refresh))
                             }
-                        }.getOrNull() ?: return@refreshTokens null
-
-                        if (!resp.status.isSuccess()) {
-                            tokenStore.clearSession()
-                            cachedAccessTokenSnapshot = null
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
                             return@refreshTokens null
                         }
-                        val refreshed = runCatching { resp.body<AuthResponseDto>() }.getOrNull()
-                            ?: return@refreshTokens null
-                        tokenStore.updateTokens(
+
+                        if (!resp.status.isSuccess()) {
+                            if (resp.status == HttpStatusCode.Unauthorized || resp.status == HttpStatusCode.Forbidden) {
+                                tokenStore.clearSession()
+                                synchronized(authCacheLock) {
+                                    cachedAccessTokenSnapshot = null
+                                    clearAuthCache(client)
+                                }
+                            }
+                            return@refreshTokens null
+                        }
+                        val refreshed = try {
+                            resp.body<AuthResponseDto>()
+                        } catch (ce: CancellationException) {
+                            throw ce
+                        } catch (_: Exception) {
+                            return@refreshTokens null
+                        }
+                        val updated = tokenStore.updateTokens(
                             accessToken = refreshed.accessToken,
                             refreshToken = refreshed.refreshToken
                         )
-                        cachedAccessTokenSnapshot = refreshed.accessToken
+                        if (!updated) {
+                            synchronized(authCacheLock) {
+                                cachedAccessTokenSnapshot = null
+                                clearAuthCache(client)
+                            }
+                            return@refreshTokens null
+                        }
+                        synchronized(authCacheLock) {
+                            cachedAccessTokenSnapshot = refreshed.accessToken
+                        }
                         BearerTokens(
                             accessToken = refreshed.accessToken,
                             refreshToken = refreshed.refreshToken
@@ -755,9 +838,11 @@ class TechEnglishApiClient internal constructor(
             val path = context.url.encodedPath
             if (path.startsWith("/v1/") && !isPublicAuthEndpoint(path)) {
                 val latestAccess = tokenStore.getAccessToken()
-                if (latestAccess != cachedAccessTokenSnapshot) {
-                    cachedAccessTokenSnapshot = latestAccess
-                    clearAuthCache(client)
+                synchronized(authCacheLock) {
+                    if (latestAccess != cachedAccessTokenSnapshot) {
+                        cachedAccessTokenSnapshot = latestAccess
+                        clearAuthCache(client)
+                    }
                 }
             }
         }
@@ -773,8 +858,10 @@ class TechEnglishApiClient internal constructor(
     }
 
     fun clearAuthCache() {
-        cachedAccessTokenSnapshot = null
-        clearAuthCache(httpClient)
+        synchronized(authCacheLock) {
+            cachedAccessTokenSnapshot = null
+            clearAuthCache(httpClient)
+        }
     }
 
     fun isNetworkAvailable(): Boolean = runCatching {
@@ -790,7 +877,7 @@ class TechEnglishApiClient internal constructor(
         val response: AuthResponseDto = httpClient.post("$base/v1/auth/register") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }.body()
+        }.requireSuccess().body()
         tokenStore.saveTokensAndSession(
             accessToken = response.accessToken,
             refreshToken = response.refreshToken,
@@ -799,8 +886,10 @@ class TechEnglishApiClient internal constructor(
             email = body.email.trim(),
             provider = AuthProvider.fromRaw(response.provider)
         )
-        cachedAccessTokenSnapshot = response.accessToken
-        clearAuthCache(httpClient)
+        synchronized(authCacheLock) {
+            cachedAccessTokenSnapshot = response.accessToken
+            clearAuthCache(httpClient)
+        }
         return response
     }
 
@@ -809,7 +898,7 @@ class TechEnglishApiClient internal constructor(
         val response: AuthResponseDto = httpClient.post("$base/v1/auth/login") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }.body()
+        }.requireSuccess().body()
         tokenStore.saveTokensAndSession(
             accessToken = response.accessToken,
             refreshToken = response.refreshToken,
@@ -818,8 +907,10 @@ class TechEnglishApiClient internal constructor(
             email = body.email.trim(),
             provider = AuthProvider.fromRaw(response.provider)
         )
-        cachedAccessTokenSnapshot = response.accessToken
-        clearAuthCache(httpClient)
+        synchronized(authCacheLock) {
+            cachedAccessTokenSnapshot = response.accessToken
+            clearAuthCache(httpClient)
+        }
         return response
     }
 
@@ -828,8 +919,10 @@ class TechEnglishApiClient internal constructor(
         val response: AuthResponseDto = httpClient.post("$base/v1/auth/oauth/ticket/exchange") {
             contentType(ContentType.Application.Json)
             setBody(OAuthTicketExchangeBodyDto(ticket = ticket))
-        }.body()
-        clearAuthCache(httpClient)
+        }.requireSuccess().body()
+        synchronized(authCacheLock) {
+            clearAuthCache(httpClient)
+        }
         return response
     }
 
@@ -839,13 +932,13 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/sync/events") {
             contentType(ContentType.Application.Json)
             setBody(batch)
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun fetchSyncState(): SyncStateResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/sync/state").body()
+        return httpClient.get("$base/v1/sync/state").requireSuccess().body()
     }
 
     suspend fun linkGuestProgress(batch: SyncBatchBodyDto): SyncBatchResponseDto {
@@ -854,25 +947,25 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/auth/guest/link") {
             contentType(ContentType.Application.Json)
             setBody(batch)
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun deleteAccount() {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        httpClient.delete("$base/v1/account")
+        httpClient.delete("$base/v1/account").requireSuccess()
     }
 
     suspend fun fetchLeaderboard(tabApiKey: String): LeaderboardResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/leaderboards/$tabApiKey").body()
+        return httpClient.get("$base/v1/leaderboards/$tabApiKey").requireSuccess().body()
     }
 
     suspend fun fetchFriends(): FriendsListResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/friends").body()
+        return httpClient.get("$base/v1/friends").requireSuccess().body()
     }
 
     suspend fun addFriend(username: String) {
@@ -881,13 +974,13 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/friends/add") {
             contentType(ContentType.Application.Json)
             setBody(AddFriendBodyDto(username))
-        }
+        }.requireSuccess()
     }
 
     suspend fun pingFriend(friendId: String) {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        httpClient.post("$base/v1/friends/$friendId/ping")
+        httpClient.post("$base/v1/friends/$friendId/ping").requireSuccess()
     }
 
     suspend fun registerPushDeviceToken(deviceToken: String, platform: String = "ANDROID"): Boolean {
@@ -913,19 +1006,19 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchActivityFeed(): FeedResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/friends/feed").body()
+        return httpClient.get("$base/v1/friends/feed").requireSuccess().body()
     }
 
     suspend fun reactToFeedEvent(eventId: String): FeedReactResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.post("$base/v1/friends/feed/$eventId/react").body()
+        return httpClient.post("$base/v1/friends/feed/$eventId/react").requireSuccess().body()
     }
 
     suspend fun fetchMyProfile(): ProfileResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/profile/me").body()
+        return httpClient.get("$base/v1/profile/me").requireSuccess().body()
     }
 
     suspend fun updateMyProfile(body: ProfileUpdateBodyDto): ProfileResponseDto {
@@ -934,7 +1027,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.patch("$base/v1/profile/me") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun reportUser(targetId: String, reason: String) {
@@ -947,13 +1040,13 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/moderation/report") {
             contentType(ContentType.Application.Json)
             setBody(ModerationReportBodyDto(targetType = targetType, targetId = targetId, reason = reason))
-        }
+        }.requireSuccess()
     }
 
     suspend fun blockUser(targetUserId: String) {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        httpClient.post("$base/v1/moderation/block/$targetUserId")
+        httpClient.post("$base/v1/moderation/block/$targetUserId").requireSuccess()
     }
 
     // Stage 4A — Comments & Mnemonics (ФТ-13.1)
@@ -961,7 +1054,7 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchComments(targetType: String, targetId: Int, sort: String = "top"): CommentsListResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/comments/$targetType/$targetId?sort=$sort").body()
+        return httpClient.get("$base/v1/comments/$targetType/$targetId?sort=$sort").requireSuccess().body()
     }
 
     suspend fun postComment(targetType: String, targetId: Int, bodyText: String): CommentItemDto {
@@ -970,7 +1063,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/comments") {
             contentType(ContentType.Application.Json)
             setBody(CreateCommentBodyDto(targetType = targetType, targetId = targetId, body = bodyText))
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun voteComment(commentId: String, vote: Int) {
@@ -979,7 +1072,7 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/comments/$commentId/vote") {
             contentType(ContentType.Application.Json)
             setBody(VoteCommentBodyDto(vote = vote))
-        }
+        }.requireSuccess()
     }
 
     // Stage 4A — Community Decks (ФТ-13.2)
@@ -987,7 +1080,7 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchCommunityDecks(): CommunityDecksListResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/decks").body()
+        return httpClient.get("$base/v1/decks").requireSuccess().body()
     }
 
     suspend fun publishCommunityDeck(body: PublishDeckBodyDto): CommunityDeckSummaryDto {
@@ -996,13 +1089,13 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/decks") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun downloadCommunityDeck(deckId: String): DownloadDeckResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.post("$base/v1/decks/$deckId/download").body()
+        return httpClient.post("$base/v1/decks/$deckId/download").requireSuccess().body()
     }
 
     suspend fun rateCommunityDeck(deckId: String, stars: Int): RateDeckResponseDto {
@@ -1011,7 +1104,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/decks/$deckId/rate") {
             contentType(ContentType.Application.Json)
             setBody(RateDeckBodyDto(stars = stars))
-        }.body()
+        }.requireSuccess().body()
     }
 
     // Stage 4B — AI Mentor Server Proxy (ФТ-8.1–8.3 — zero client API keys)
@@ -1019,7 +1112,7 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchAiQuota(): AiQuotaResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/ai/quota").body()
+        return httpClient.get("$base/v1/ai/quota").requireSuccess().body()
     }
 
     suspend fun submitAiInterview(body: AiInterviewRequestDto): AiInterviewResponseDto {
@@ -1028,7 +1121,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/ai/interview") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun submitAiCodeReview(body: AiCodeReviewRequestDto): AiCodeReviewResponseDto {
@@ -1037,7 +1130,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/ai/code-review") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }.body()
+        }.requireSuccess().body()
     }
 
     // Stage 4B — Squads (ФТ-14.4)
@@ -1045,7 +1138,7 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchMySquad(): MySquadResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/squads/my").body()
+        return httpClient.get("$base/v1/squads/my").requireSuccess().body()
     }
 
     suspend fun createSquad(name: String, weeklyGoalXp: Int): SquadDto {
@@ -1054,7 +1147,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/squads") {
             contentType(ContentType.Application.Json)
             setBody(CreateSquadBodyDto(name = name, weeklyGoalXp = weeklyGoalXp))
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun joinSquad(inviteCode: String): SquadDto {
@@ -1063,13 +1156,13 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/squads/join") {
             contentType(ContentType.Application.Json)
             setBody(JoinSquadBodyDto(inviteCode = inviteCode))
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun leaveSquad() {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        httpClient.post("$base/v1/squads/leave")
+        httpClient.post("$base/v1/squads/leave").requireSuccess()
     }
 
     // Stage 4B — Dictionary Crowdsourcing PRs (ФТ-14.3)
@@ -1077,13 +1170,13 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchCrowdsourceEligibility(): CrowdsourceEligibilityResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/crowdsource/eligibility").body()
+        return httpClient.get("$base/v1/crowdsource/eligibility").requireSuccess().body()
     }
 
     suspend fun fetchDictionaryPrs(): DictionaryPrListResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/crowdsource/prs").body()
+        return httpClient.get("$base/v1/crowdsource/prs").requireSuccess().body()
     }
 
     suspend fun submitDictionaryPr(body: SubmitDictionaryPrBodyDto) {
@@ -1092,7 +1185,7 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/crowdsource/prs") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }
+        }.requireSuccess()
     }
 
     suspend fun voteDictionaryPr(prId: String, vote: Int) {
@@ -1101,7 +1194,7 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/crowdsource/prs/$prId/vote") {
             contentType(ContentType.Application.Json)
             setBody(VoteCommentBodyDto(vote = vote))
-        }
+        }.requireSuccess()
     }
 
     // Stage 4C — Thematic Rooms REST + Ktor WebSockets (ФТ-13.3)
@@ -1109,7 +1202,7 @@ class TechEnglishApiClient internal constructor(
     suspend fun fetchRoomMessages(roomSlug: String): RoomMessagesListResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/rooms/$roomSlug/messages").body()
+        return httpClient.get("$base/v1/rooms/$roomSlug/messages").requireSuccess().body()
     }
 
     suspend fun postRoomMessage(roomSlug: String, bodyText: String): RoomMessageDto {
@@ -1118,13 +1211,13 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/rooms/$roomSlug/messages") {
             contentType(ContentType.Application.Json)
             setBody(PostRoomMessageBodyDto(body = bodyText))
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun requestWsTicket(scope: String = "ws"): WsTicketResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.post("$base/v1/ws/ticket?scope=$scope").body()
+        return httpClient.post("$base/v1/ws/ticket?scope=$scope").requireSuccess().body()
     }
 
     internal fun buildRoomWsUrl(baseUrl: String, roomSlug: String, ticket: String): String {
@@ -1152,14 +1245,17 @@ class TechEnglishApiClient internal constructor(
                 onStatusChanged(WsConnectionState.CONNECTED)
                 for (frame in incoming) {
                     if (frame is Frame.Text) {
-                        runCatching {
-                            val dto = jsonConfig.decodeFromString<RoomMessageDto>(frame.readText())
-                            if (dto.id.isNotBlank()) onMessage(dto)
-                        }
+                        val dto = runCatching {
+                            jsonConfig.decodeFromString<RoomMessageDto>(frame.readText())
+                        }.getOrNull()
+                        if (dto != null && dto.id.isNotBlank()) onMessage(dto)
                     }
                 }
             }
             onStatusChanged(WsConnectionState.DISCONNECTED)
+        } catch (ce: CancellationException) {
+            onStatusChanged(WsConnectionState.DISCONNECTED)
+            throw ce
         } catch (exc: Exception) {
             onStatusChanged(WsConnectionState.ERROR)
             throw exc
@@ -1199,10 +1295,10 @@ class TechEnglishApiClient internal constructor(
                     try {
                         for (frame in incoming) {
                             if (frame is Frame.Text) {
-                                runCatching {
-                                    val evt = jsonConfig.decodeFromString<PvpWsEventDto>(frame.readText())
-                                    if (evt.type.isNotBlank()) onEvent(evt)
-                                }
+                                val evt = runCatching {
+                                    jsonConfig.decodeFromString<PvpWsEventDto>(frame.readText())
+                                }.getOrNull()
+                                if (evt != null && evt.type.isNotBlank()) onEvent(evt)
                             }
                         }
                     } finally {
@@ -1211,6 +1307,9 @@ class TechEnglishApiClient internal constructor(
                 }
             }
             onStatusChanged(WsConnectionState.DISCONNECTED)
+        } catch (ce: CancellationException) {
+            onStatusChanged(WsConnectionState.DISCONNECTED)
+            throw ce
         } catch (exc: Exception) {
             onStatusChanged(WsConnectionState.ERROR)
             throw exc
@@ -1225,7 +1324,7 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/pvp/matchmake") {
             contentType(ContentType.Application.Json)
             setBody(PvpMatchmakeBodyDto(forceTrainingFallback = forceTrainingFallback))
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun submitPvpAnswers(matchId: String, answers: List<Int>): PvpSubmitResponseDto {
@@ -1234,17 +1333,20 @@ class TechEnglishApiClient internal constructor(
         return httpClient.post("$base/v1/pvp/$matchId/submit") {
             contentType(ContentType.Application.Json)
             setBody(PvpSubmitBodyDto(answers = answers))
-        }.body()
+        }.requireSuccess().body()
     }
 
     suspend fun disconnectPvp(matchId: String, reason: String = "network_drop") {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: return
-        runCatching {
+        try {
             httpClient.post("$base/v1/pvp/$matchId/disconnect") {
                 contentType(ContentType.Application.Json)
                 setBody(PvpDisconnectBodyDto(reason = reason))
             }
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Exception) {
         }
     }
 
@@ -1252,13 +1354,13 @@ class TechEnglishApiClient internal constructor(
 
     suspend fun fetchDailyPeerCase(): PeerReviewCaseDto {
         val base = resolveBaseUrl()
-        return httpClient.get("$base/v1/peer-review/daily-case").body()
+        return httpClient.get("$base/v1/peer-review/daily-case").requireSuccess().body()
     }
 
     suspend fun fetchPeerSubmissions(): PeerReviewSubmissionsResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/peer-review/submissions").body()
+        return httpClient.get("$base/v1/peer-review/submissions").requireSuccess().body()
     }
 
     suspend fun submitPeerReview(body: PeerReviewSubmitBodyDto) {
@@ -1267,7 +1369,7 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/peer-review/submissions") {
             contentType(ContentType.Application.Json)
             setBody(body)
-        }
+        }.requireSuccess()
     }
 
     suspend fun postPeerFeedback(submissionId: String, ratingStars: Int, commentText: String) {
@@ -1276,27 +1378,88 @@ class TechEnglishApiClient internal constructor(
         httpClient.post("$base/v1/peer-review/submissions/$submissionId/feedback") {
             contentType(ContentType.Application.Json)
             setBody(PeerReviewFeedbackBodyDto(ratingStars = ratingStars, commentText = commentText))
-        }
+        }.requireSuccess()
     }
 
     suspend fun fetchPeerReviewVoiceUrl(submissionId: String): PeerReviewVoiceUrlResponseDto {
         val base = resolveBaseUrl()
         tokenStore.getAccessToken() ?: error("Not authenticated")
-        return httpClient.get("$base/v1/peer-review/submissions/$submissionId/voice-url").body()
+        return httpClient.get("$base/v1/peer-review/submissions/$submissionId/voice-url").requireSuccess().body()
     }
 
     suspend fun fetchOtaManifest(): OtaManifestResponseDto {
         val base = resolveBaseUrl()
-        return httpClient.get("$base/v1/ota/manifest").body()
+        return httpClient.get("$base/v1/ota/manifest").requireSuccess().body()
     }
 
     suspend fun fetchOtaPack(packId: String): OtaPackDownloadDto {
         val base = resolveBaseUrl()
-        return httpClient.get("$base/v1/ota/packs/$packId").body()
+        return httpClient.get("$base/v1/ota/packs/$packId").requireSuccess().body()
     }
 
     suspend fun fetchExternalOtaPayload(downloadUrl: String): String {
-        return httpClient.get(downloadUrl).body()
+        return httpClient.get(downloadUrl).requireSuccess().body()
+    }
+
+    suspend fun fetchAppVersionFromBackend(): AppVersionMetadataDto {
+        val base = resolveBaseUrl()
+        val raw = httpClient.get("$base/v1/app/version") {
+            timeout {
+                connectTimeoutMillis = 6_000L
+                requestTimeoutMillis = 8_000L
+                socketTimeoutMillis = 8_000L
+            }
+        }.requireSuccess().bodyAsText()
+        return jsonConfig.decodeFromString<AppVersionMetadataDto>(raw)
+    }
+
+    suspend fun fetchAppVersionFromFallback(
+        fallbackUrl: String = BuildConfig.OTA_MANIFEST_FALLBACK_URL
+    ): AppVersionMetadataDto {
+        val raw = httpClient.get(fallbackUrl) {
+            timeout {
+                connectTimeoutMillis = 8_000L
+                requestTimeoutMillis = 10_000L
+                socketTimeoutMillis = 10_000L
+            }
+        }.requireSuccess().bodyAsText()
+        return jsonConfig.decodeFromString<AppVersionMetadataDto>(raw)
+    }
+
+    suspend fun downloadApkToFile(
+        apkUrl: String,
+        targetFile: File,
+        onProgress: (downloadedBytes: Long, totalBytes: Long) -> Unit = { _, _ -> }
+    ) {
+        withContext(Dispatchers.IO) {
+            targetFile.parentFile?.mkdirs()
+            httpClient.prepareGet(apkUrl) {
+                timeout {
+                    connectTimeoutMillis = 20_000L
+                    requestTimeoutMillis = 600_000L
+                    socketTimeoutMillis = 120_000L
+                }
+            }.execute { response ->
+                response.requireSuccess()
+                val totalBytes = response.contentLength() ?: -1L
+                val channel = response.bodyAsChannel()
+                FileOutputStream(targetFile).use { fos ->
+                    val buffer = ByteArray(32 * 1024)
+                    var downloaded = 0L
+                    onProgress(0L, totalBytes)
+                    while (!channel.isClosedForRead) {
+                        val read = channel.readAvailable(buffer, 0, buffer.size)
+                        if (read < 0) break
+                        if (read > 0) {
+                            fos.write(buffer, 0, read)
+                            downloaded += read
+                            onProgress(downloaded, totalBytes)
+                        }
+                    }
+                    fos.fd.sync()
+                }
+            }
+        }
     }
 
     suspend fun warmupHealth(): Boolean = runCatching {

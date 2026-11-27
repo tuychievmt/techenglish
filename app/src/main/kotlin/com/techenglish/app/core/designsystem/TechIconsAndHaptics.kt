@@ -8,17 +8,24 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.MergeType
 import androidx.compose.material.icons.rounded.AccountTree
@@ -37,20 +44,27 @@ import androidx.compose.material.icons.rounded.Web
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 fun categoryIconVector(iconName: String): ImageVector = when (iconName.lowercase()) {
@@ -205,6 +219,26 @@ fun SkeletonListPlaceholder(
     }
 }
 
+const val DEFAULT_ACADEMIC_TERMS_COUNT = 20_659
+
+fun formatCountSpaced(count: Int): String =
+    count.coerceAtLeast(0).toString().reversed().chunked(3).joinToString(" ").reversed()
+
+@Composable
+fun navigationBarContentPadding(
+    horizontal: Dp = 16.dp,
+    top: Dp = 16.dp,
+    extraBottom: Dp = 24.dp
+): PaddingValues {
+    val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    return PaddingValues(
+        start = horizontal,
+        end = horizontal,
+        top = top,
+        bottom = navBottom + extraBottom
+    )
+}
+
 // ==================== TERMINAL SEARCH FIELD WITH BLINKING CURSOR '_' (УИ-3.3) ====================
 
 @Composable
@@ -216,13 +250,14 @@ fun TerminalSearchField(
     onClear: (() -> Unit)? = null
 ) {
     val interactionConfig = LocalTechInteractionConfig.current
+    var isFocused by remember { mutableStateOf(false) }
     val cursorAlpha = if (interactionConfig.reduceMotionEnabled) {
         1f
     } else {
         val transition = rememberInfiniteTransition(label = "terminal_cursor")
         val animated by transition.animateFloat(
             initialValue = 1f,
-            targetValue = 0.15f,
+            targetValue = 0.45f,
             animationSpec = infiniteRepeatable(
                 animation = tween(durationMillis = 550),
                 repeatMode = RepeatMode.Reverse
@@ -232,45 +267,82 @@ fun TerminalSearchField(
         animated
     }
 
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier.fillMaxWidth(),
-        singleLine = true,
-        shape = MaterialTheme.shapes.medium,
-        leadingIcon = {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(start = 8.dp)
-            ) {
-                Icon(
-                    Icons.Rounded.Search,
-                    contentDescription = "Поиск",
-                    modifier = Modifier.size(18.dp)
+    val prefixColor = if (interactionConfig.isDarkTheme) TechColors.Cyan else Color(0xFF1D4ED8)
+    val borderColor = if (isFocused) prefixColor else MaterialTheme.colorScheme.outlineVariant
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp, max = 52.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = ">",
+                    style = CodeTextStyle,
+                    fontWeight = FontWeight.Bold,
+                    color = prefixColor
                 )
-                Spacer(Modifier.width(4.dp))
                 Text(
                     text = "_",
                     style = CodeTextStyle,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary.copy(alpha = cursorAlpha)
+                    color = prefixColor.copy(alpha = cursorAlpha)
                 )
             }
-        },
-        placeholder = {
-            Text(
-                text = "$placeholderText _",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        },
-        trailingIcon = {
+
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (value.isEmpty()) {
+                    Text(
+                        text = placeholderText,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                BasicTextField(
+                    value = value,
+                    onValueChange = onValueChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { isFocused = it.isFocused },
+                    singleLine = true,
+                    maxLines = 1,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(prefixColor)
+                )
+            }
+
             if (value.isNotEmpty()) {
-                IconButton(onClick = { onClear?.invoke() ?: onValueChange("") }) {
-                    Icon(Icons.Rounded.Clear, contentDescription = "Очистить поиск")
+                IconButton(
+                    onClick = { onClear?.invoke() ?: onValueChange("") },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Clear,
+                        contentDescription = "Очистить поиск",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
-    )
+    }
 }
 

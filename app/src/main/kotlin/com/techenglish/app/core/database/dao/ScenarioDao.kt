@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import com.techenglish.app.core.database.entity.ScenarioEntity
 import com.techenglish.app.core.database.entity.WorkPhraseEntity
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,9 @@ interface ScenarioDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(scenarios: List<ScenarioEntity>)
+
+    @Upsert
+    suspend fun upsertAll(scenarios: List<ScenarioEntity>)
 }
 
 @Dao
@@ -39,4 +43,7 @@ interface WorkPhraseDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(phrases: List<WorkPhraseEntity>)
+
+    @Upsert
+    suspend fun upsertAll(phrases: List<WorkPhraseEntity>)
 }

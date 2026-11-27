@@ -267,4 +267,27 @@ class UpdateSettingsUseCase @Inject constructor(
         settingsRepository.setAllowFriendPings(allowed)
     suspend fun setAiConsentAccepted(accepted: Boolean) =
         settingsRepository.setAiConsentAccepted(accepted)
+    suspend fun setInitialSetupCompleted(completed: Boolean) =
+        settingsRepository.setInitialSetupCompleted(completed)
+    suspend fun setLocalUsername(username: String) =
+        settingsRepository.setLocalUsername(username)
+    suspend fun setDeveloperRole(role: String) =
+        settingsRepository.setDeveloperRole(role)
+    suspend fun completeInitialSetup(
+        localUsername: String,
+        displayName: String,
+        developerRole: String,
+        dailyGoal: Int,
+        translationLanguage: TranslationLanguage,
+        themeMode: ThemeMode,
+        pendingProfileSync: Boolean
+    ) = settingsRepository.completeInitialSetup(
+        localUsername = localUsername,
+        displayName = displayName,
+        developerRole = developerRole,
+        dailyGoal = dailyGoal,
+        translationLanguage = translationLanguage,
+        themeMode = themeMode,
+        pendingProfileSync = pendingProfileSync
+    )
 }

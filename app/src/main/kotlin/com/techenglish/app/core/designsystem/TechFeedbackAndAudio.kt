@@ -2,7 +2,9 @@ package com.techenglish.app.core.designsystem
 
 import android.content.Context
 import android.content.Intent
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,6 +52,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.techenglish.app.core.audio.AudioPlaybackState
 import com.techenglish.app.core.audio.TtsVoiceStatus
@@ -198,6 +202,9 @@ fun StatusBadge(
             style = MonoTagTextStyle,
             color = contentColor,
             fontWeight = FontWeight.SemiBold,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
@@ -288,7 +295,7 @@ fun AudioControlBar(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(10.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -296,31 +303,57 @@ fun AudioControlBar(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     FilledTonalIconButton(
-                        onClick = if (playbackState.isPlaying) onPause else onPlay
+                        onClick = if (playbackState.isPlaying) onPause else onPlay,
+                        modifier = Modifier.size(36.dp)
                     ) {
                         Icon(
                             imageVector = if (playbackState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                            contentDescription = if (playbackState.isPlaying) "Пауза" else "Воспроизвести"
+                            contentDescription = if (playbackState.isPlaying) "Пауза" else "Воспроизвести",
+                            modifier = Modifier.size(18.dp)
                         )
                     }
-                    IconButton(onClick = onReplay) {
-                        Icon(Icons.Rounded.Replay, contentDescription = "Повторить")
+                    IconButton(onClick = onReplay, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Rounded.Replay, contentDescription = "Повторить", modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = onStop) {
-                        Icon(Icons.Rounded.Stop, contentDescription = "Стоп")
+                    IconButton(onClick = onStop, modifier = Modifier.size(34.dp)) {
+                        Icon(Icons.Rounded.Stop, contentDescription = "Стоп", modifier = Modifier.size(18.dp))
                     }
                 }
 
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     listOf(0.75f to "0.75x", 1.0f to "1x", 1.25f to "1.25x").forEach { (speed, label) ->
-                        FilterChip(
-                            selected = kotlin.math.abs(playbackState.playbackSpeed - speed) < 0.05f,
-                            onClick = { onSpeedChange(speed) },
-                            label = { Text(label, style = MonoTagTextStyle) }
-                        )
+                        val selected = kotlin.math.abs(playbackState.playbackSpeed - speed) < 0.05f
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (selected) MaterialTheme.colorScheme.secondaryContainer
+                            else MaterialTheme.colorScheme.surfaceContainerLow,
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.outlineVariant
+                            ),
+                            modifier = Modifier
+                                .widthIn(min = 52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onSpeedChange(speed) }
+                        ) {
+                            Box(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    style = MonoTagTextStyle,
+                                    color = if (selected) MaterialTheme.colorScheme.onSecondaryContainer
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    softWrap = false
+                                )
+                            }
+                        }
                     }
                 }
             }

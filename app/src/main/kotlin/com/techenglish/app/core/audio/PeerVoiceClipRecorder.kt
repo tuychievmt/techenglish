@@ -70,6 +70,8 @@ class AndroidPeerVoiceClipRecorder @Inject constructor(
             @Suppress("DEPRECATION")
             MediaRecorder()
         }
+        recorder = mr
+        outputFile = file
         mr.setAudioSource(MediaRecorder.AudioSource.MIC)
         mr.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
         mr.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
@@ -81,8 +83,6 @@ class AndroidPeerVoiceClipRecorder @Inject constructor(
         mr.prepare()
         mr.start()
 
-        recorder = mr
-        outputFile = file
         startedAtMs = System.currentTimeMillis()
         isRecording = true
     }.onFailure {

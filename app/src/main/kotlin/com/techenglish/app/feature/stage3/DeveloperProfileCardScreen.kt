@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,6 +49,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.domain.usecase.ValidateSocialActionsUseCase
 
 // =========================================================================
@@ -63,19 +66,43 @@ fun DeveloperProfileCardScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val existing = state.profile
-    var username by remember(existing) { mutableStateOf(existing?.username ?: state.session.username) }
-    var displayName by remember(existing) { mutableStateOf(existing?.displayName ?: state.settings.userName) }
-    var avatarKey by remember(existing) { mutableStateOf(existing?.avatarKey ?: "preset_terminal") }
-    var statusText by remember(existing) { mutableStateOf(existing?.statusText ?: "Building offline-first software") }
-    var techStack by remember(existing) { mutableStateOf(existing?.techStackCsv ?: "Kotlin, Python, SQL") }
-    var githubUrl by remember(existing) { mutableStateOf(existing?.githubUrl ?: "") }
-    var telegramHandle by remember(existing) { mutableStateOf(existing?.telegramHandle ?: "") }
+    var draftInitialized by remember { mutableStateOf(false) }
+    val resolvedDefaultUsername = existing?.username
+        ?: state.session.username.takeIf { !state.session.isGuest && it.isNotBlank() }
+        ?: state.settings.localUsername.ifBlank { state.session.username }
+    var username by remember { mutableStateOf(resolvedDefaultUsername) }
+    var displayName by remember { mutableStateOf(existing?.displayName ?: state.settings.userName) }
+    var avatarKey by remember { mutableStateOf(existing?.avatarKey ?: "preset_terminal") }
+    var statusText by remember { mutableStateOf(existing?.statusText ?: "Building offline-first software") }
+    var techStack by remember { mutableStateOf(existing?.techStackCsv ?: "Kotlin, Python, SQL") }
+    var githubUrl by remember { mutableStateOf(existing?.githubUrl ?: "") }
+    var telegramHandle by remember { mutableStateOf(existing?.telegramHandle ?: "") }
+
+    LaunchedEffect(existing, state.session.username, state.settings.localUsername, state.settings.userName) {
+        if (!draftInitialized) {
+            if (existing != null) {
+                username = existing.username
+                displayName = existing.displayName
+                avatarKey = existing.avatarKey
+                statusText = existing.statusText
+                techStack = existing.techStackCsv
+                githubUrl = existing.githubUrl
+                telegramHandle = existing.telegramHandle
+                draftInitialized = true
+            } else if (!state.session.isGuest || state.settings.localUsername.isNotBlank() || state.settings.userName != "Разработчик") {
+                username = resolvedDefaultUsername
+                displayName = state.settings.userName
+                draftInitialized = true
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.events.collect { snackbarHostState.showSnackbar(it) }
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Карточка разработчика и бейджи") },
@@ -91,8 +118,9 @@ fun DeveloperProfileCardScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // Public Developer Card Preview

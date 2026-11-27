@@ -172,6 +172,8 @@ class ReviewReminderWorker @AssistedInject constructor(
                 notificationHelper.showDueWordsNotification(totalDue)
             }
             Result.success()
+        } catch (ce: kotlinx.coroutines.CancellationException) {
+            throw ce
         } catch (_: Throwable) {
             Result.retry()
         }

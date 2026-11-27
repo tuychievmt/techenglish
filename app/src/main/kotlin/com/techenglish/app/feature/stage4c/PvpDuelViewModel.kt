@@ -2,6 +2,7 @@ package com.techenglish.app.feature.stage4c
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.techenglish.app.core.network.PvpQuestionDto
 import com.techenglish.app.core.network.PvpWsEventDto
 import com.techenglish.app.core.network.TechEnglishApiClient
 import com.techenglish.app.core.network.WsConnectionState
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
@@ -53,7 +55,7 @@ class PvpDuelViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(PvpDuelUiState(isOffline = !apiClient.isNetworkAvailable()))
     val uiState: StateFlow<PvpDuelUiState> = _uiState
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     private var timerJob: Job? = null
@@ -107,10 +109,10 @@ class PvpDuelViewModel @Inject constructor(
                 }
             }
             "answer_ack" -> {
-                _uiState.value = current.copy(playerScore = evt.score)
+                _uiState.update { it.copy(playerScore = evt.score) }
             }
             "opponent_score", "opponent_finished" -> {
-                _uiState.value = current.copy(opponentScore = evt.score)
+                _uiState.update { it.copy(opponentScore = evt.score) }
             }
             "opponent_disconnected" -> {
                 if (current.matchState == PvpMatchState.IN_PROGRESS) {
@@ -123,15 +125,17 @@ class PvpDuelViewModel @Inject constructor(
                         playerScore = current.playerScore,
                         opponentScore = current.opponentScore
                     )
-                    _uiState.value = current.copy(
-                        matchState = outcome.finalState,
-                        outcome = outcome
-                    )
+                    _uiState.update {
+                        it.copy(
+                            matchState = outcome.finalState,
+                            outcome = outcome
+                        )
+                    }
                     _events.tryEmit(outcome.summaryRu)
                 }
             }
             "match_completed" -> {
-                _uiState.value = current.copy(playerScore = evt.score)
+                _uiState.update { it.copy(playerScore = evt.score) }
             }
         }
     }
@@ -141,23 +145,28 @@ class PvpDuelViewModel @Inject constructor(
         closePvpWebSocket()
         val offline = !apiClient.isNetworkAvailable()
         if (offline) {
-            _uiState.value = _uiState.value.copy(isOffline = true)
+            _uiState.update { it.copy(isOffline = true) }
             _events.tryEmit("Нет сети: запускаем тренировочный раунд без рейтинговых очков.")
             startTrainingFallbackRound()
             return
         }
-        _uiState.value = PvpDuelUiState(
-            mode = PvpMatchMode.RANKED_1V1,
-            matchState = PvpMatchState.SEARCHING,
-            matchmakingSecondsLeft = EvaluatePvpDuelUseCase.MATCHMAKING_TIMEOUT_SECONDS,
-            isOffline = false
-        )
+        _uiState.update {
+            PvpDuelUiState(
+                mode = PvpMatchMode.RANKED_1V1,
+                matchState = PvpMatchState.SEARCHING,
+                matchmakingSecondsLeft = EvaluatePvpDuelUseCase.MATCHMAKING_TIMEOUT_SECONDS,
+                isOffline = false
+            )
+        }
         timerJob = viewModelScope.launch {
+            if (tokenStore.getAccessToken().isNullOrBlank()) {
+                _events.emit("Рейтинговая 1v1 дуэль требует входа в облачный аккаунт — запускаем тренировочный раунд.")
+                startTrainingFallbackRound()
+                return@launch
+            }
             // Warm up backend (/health) before 15s matchmaking countdown (Render Free cold start)
             runCatching { apiClient.warmupHealth() }
-            val serverMatch = if (!tokenStore.getAccessToken().isNullOrBlank()) {
-                runCatching { apiClient.matchmakePvp(forceTrainingFallback = false) }.getOrNull()
-            } else null
+            val serverMatch = runCatching { apiClient.matchmakePvp(forceTrainingFallback = false) }.getOrNull()
 
             if (serverMatch != null && serverMatch.state == "IN_PROGRESS") {
                 beginActiveRound(
@@ -198,14 +207,21 @@ class PvpDuelViewModel @Inject constructor(
     fun startTrainingFallbackRound() {
         timerJob?.cancel()
         closePvpWebSocket()
-        viewModelScope.launch {
+        timerJob = viewModelScope.launch {
             val serverRes = if (apiClient.isNetworkAvailable() && !tokenStore.getAccessToken().isNullOrBlank()) {
                 runCatching { apiClient.matchmakePvp(forceTrainingFallback = true) }.getOrNull()
             } else null
 
-            val questions = serverRes?.questions?.map {
-                PvpQuestion(it.id, it.promptEn, it.options, it.correctOptionIndex, it.categoryTag)
-            }?.takeIf { it.isNotEmpty() } ?: fallbackTrainingQuestions()
+            val questions = serverRes?.questions?.map { dto ->
+                PvpQuestion(
+                    id = dto.id,
+                    promptEn = dto.promptEn,
+                    options = dto.options,
+                    correctOptionIndex = resolveTrainingCorrectIndex(dto),
+                    categoryTag = dto.categoryTag
+                )
+            }?.takeIf { list -> list.isNotEmpty() && list.all { it.correctOptionIndex >= 0 } }
+                ?: fallbackTrainingQuestions()
 
             beginActiveRound(
                 matchId = serverRes?.matchId ?: "training_${UUID.randomUUID()}",
@@ -216,6 +232,17 @@ class PvpDuelViewModel @Inject constructor(
         }
     }
 
+    internal fun startLocalTrainingRoundNow(matchId: String = "training_${UUID.randomUUID()}") {
+        timerJob?.cancel()
+        closePvpWebSocket()
+        beginActiveRound(
+            matchId = matchId,
+            mode = PvpMatchMode.TRAINING_FALLBACK,
+            questions = fallbackTrainingQuestions(),
+            connectLiveWs = false
+        )
+    }
+
     private fun beginActiveRound(
         matchId: String,
         mode: PvpMatchMode,
@@ -223,26 +250,29 @@ class PvpDuelViewModel @Inject constructor(
         connectLiveWs: Boolean
     ) {
         timerJob?.cancel()
-        _uiState.value = PvpDuelUiState(
-            matchId = matchId,
-            mode = mode,
-            matchState = PvpMatchState.IN_PROGRESS,
-            roundSecondsLeft = EvaluatePvpDuelUseCase.ROUND_DURATION_SECONDS,
-            questions = questions,
-            currentQuestionIndex = 0,
-            selectedAnswers = emptyList(),
-            playerScore = 0,
-            opponentScore = 0,
-            wsState = _uiState.value.wsState,
-            outcome = null,
-            isOffline = !apiClient.isNetworkAvailable()
-        )
+        _uiState.update { prev ->
+            PvpDuelUiState(
+                matchId = matchId,
+                mode = mode,
+                matchState = PvpMatchState.IN_PROGRESS,
+                roundSecondsLeft = EvaluatePvpDuelUseCase.ROUND_DURATION_SECONDS,
+                questions = questions,
+                currentQuestionIndex = 0,
+                selectedAnswers = emptyList(),
+                playerScore = 0,
+                opponentScore = 0,
+                wsState = prev.wsState,
+                outcome = null,
+                isOffline = !apiClient.isNetworkAvailable()
+            )
+        }
         if (connectLiveWs && mode == PvpMatchMode.RANKED_1V1 && !matchId.startsWith("training_")) {
             openLivePvpWebSocket(matchId)
         }
         timerJob = viewModelScope.launch {
             for (sec in EvaluatePvpDuelUseCase.ROUND_DURATION_SECONDS downTo 0) {
-                _uiState.value = _uiState.value.copy(roundSecondsLeft = sec)
+                if (_uiState.value.matchState != PvpMatchState.IN_PROGRESS) break
+                _uiState.update { it.copy(roundSecondsLeft = sec) }
                 if (sec == 0) {
                     finishCurrentMatch()
                     break
@@ -253,32 +283,80 @@ class PvpDuelViewModel @Inject constructor(
     }
 
     fun submitAnswer(optionIndex: Int) {
-        val current = _uiState.value
-        if (current.matchState != PvpMatchState.IN_PROGRESS) return
-        val qIdx = current.currentQuestionIndex
-        val q = current.questions.getOrNull(qIdx) ?: return
+        var answeredQuestionIdx = -1
+        var shouldFinish = false
 
-        // In live Ranked 1v1, the server owns answer verification (BUG-09: no client-side answer key);
-        // local scoring is only used for offline training fallback questions that carry a local key >= 0.
-        val localDelta = if (q.correctOptionIndex >= 0 && optionIndex == q.correctOptionIndex) 1 else 0
-        val newScore = current.playerScore + localDelta
-        val newAnswers = current.selectedAnswers + optionIndex
-        val nextIdx = qIdx + 1
+        _uiState.update { current ->
+            if (current.matchState != PvpMatchState.IN_PROGRESS) return@update current
+            val qIdx = current.currentQuestionIndex
+            val q = current.questions.getOrNull(qIdx) ?: return@update current
+            answeredQuestionIdx = qIdx
+
+            // In live Ranked 1v1, the server owns answer verification (BUG-09: no client-side answer key);
+            // in Training Fallback, score locally against the resolved answer key and simulate bot opponent progress.
+            val localDelta = if (q.correctOptionIndex >= 0 && optionIndex == q.correctOptionIndex) 1 else 0
+            val newPlayerScore = current.playerScore + localDelta
+            val botDelta = if (current.mode == PvpMatchMode.TRAINING_FALLBACK) {
+                simulateTrainingBotPoint(qIdx, current.matchId)
+            } else {
+                0
+            }
+            val newOpponentScore = current.opponentScore + botDelta
+            val newAnswers = current.selectedAnswers + optionIndex
+            val nextIdx = qIdx + 1
+
+            if (nextIdx >= current.questions.size) {
+                shouldFinish = true
+                current.copy(
+                    selectedAnswers = newAnswers,
+                    playerScore = newPlayerScore,
+                    opponentScore = newOpponentScore
+                )
+            } else {
+                current.copy(
+                    selectedAnswers = newAnswers,
+                    playerScore = newPlayerScore,
+                    opponentScore = newOpponentScore,
+                    currentQuestionIndex = nextIdx
+                )
+            }
+        }
+
+        if (answeredQuestionIdx < 0) return
 
         outgoingWsChannel?.trySend(
-            """{"type":"answer","question_index":$qIdx,"option_index":$optionIndex}"""
+            """{"type":"answer","question_index":$answeredQuestionIdx,"option_index":$optionIndex}"""
         )
 
-        if (nextIdx >= current.questions.size) {
-            _uiState.value = current.copy(selectedAnswers = newAnswers, playerScore = newScore)
+        if (shouldFinish) {
             finishCurrentMatch()
-        } else {
-            _uiState.value = current.copy(
-                selectedAnswers = newAnswers,
-                playerScore = newScore,
-                currentQuestionIndex = nextIdx
-            )
         }
+    }
+
+    internal fun simulateTrainingBotPoint(questionIndex: Int, matchId: String): Int {
+        val hash = (matchId.hashCode() and 0x7fffffff) + (questionIndex * 31)
+        return if (hash % 3 != 0) 1 else 0
+    }
+
+    private fun resolveTrainingCorrectIndex(dto: PvpQuestionDto): Int {
+        if (dto.correctOptionIndex in dto.options.indices) return dto.correctOptionIndex
+        val knownSnippets = listOf(
+            "Idempotency",
+            "Two transactions",
+            "Nit: could we extract",
+            "Slow consumers",
+            "Fast producers overwhelming",
+            "Kubelet restarts",
+            "Restarts the container",
+            "We have rolled back",
+            "Gradually routing",
+            "JVM class metadata",
+            "Allowable unreliability"
+        )
+        val matchedIdx = dto.options.indexOfFirst { opt ->
+            knownSnippets.any { needle -> opt.contains(needle, ignoreCase = true) }
+        }
+        return if (matchedIdx >= 0) matchedIdx else -1
     }
 
     fun handleDisconnectGracefully() {
@@ -307,18 +385,21 @@ class PvpDuelViewModel @Inject constructor(
 
     private fun finishCurrentMatch() {
         timerJob?.cancel()
-        outgoingWsChannel?.trySend("""{"type":"finish"}""")
         val current = _uiState.value
+        if (current.matchState != PvpMatchState.IN_PROGRESS) return
+        outgoingWsChannel?.trySend("""{"type":"finish"}""")
         val provisionalOutcome = evaluatePvpDuel.evaluateCompletedMatch(
             matchId = current.matchId,
             mode = current.mode,
             playerScore = current.playerScore,
-            opponentScore = if (current.mode == PvpMatchMode.TRAINING_FALLBACK) current.questions.size else current.opponentScore
+            opponentScore = current.opponentScore
         )
-        _uiState.value = current.copy(
-            matchState = PvpMatchState.COMPLETED,
-            outcome = provisionalOutcome
-        )
+        _uiState.update {
+            it.copy(
+                matchState = PvpMatchState.COMPLETED,
+                outcome = provisionalOutcome
+            )
+        }
         viewModelScope.launch {
             if (apiClient.isNetworkAvailable() && !tokenStore.getAccessToken().isNullOrBlank() && !current.matchId.startsWith("training_")) {
                 runCatching { apiClient.submitPvpAnswers(current.matchId, current.selectedAnswers) }
@@ -327,12 +408,14 @@ class PvpDuelViewModel @Inject constructor(
                             matchId = res.matchId,
                             mode = current.mode,
                             playerScore = res.playerScore,
-                            opponentScore = if (current.mode == PvpMatchMode.TRAINING_FALLBACK) res.totalQuestions else _uiState.value.opponentScore
+                            opponentScore = _uiState.value.opponentScore
                         )
-                        _uiState.value = _uiState.value.copy(
-                            playerScore = res.playerScore,
-                            outcome = authoritativeOutcome
-                        )
+                        _uiState.update {
+                            it.copy(
+                                playerScore = res.playerScore,
+                                outcome = authoritativeOutcome
+                            )
+                        }
                     }
             }
             closePvpWebSocket()
@@ -345,15 +428,15 @@ class PvpDuelViewModel @Inject constructor(
         super.onCleared()
     }
 
-    private fun fallbackTrainingQuestions(): List<PvpQuestion> = listOf(
+    internal fun fallbackTrainingQuestions(): List<PvpQuestion> = listOf(
         PvpQuestion("tr1", "Which term describes an operation that produces the same result when repeated?", listOf("Idempotency", "Sharding", "Deadlock", "Starvation"), 0, "API"),
-        PvpQuestion("tr2", "Log: 'SQLSTATE 40P01: deadlock detected'. Root cause?", listOf("Two transactions waiting on each other's locks", "Expired TLS cert", "Disk full", "Malformed JSON"), 0, "LOGS"),
-        PvpQuestion("tr3", "Best polite PR comment phrasing:", listOf("Nit: could we extract this helper for clarity?", "Wrong code, rewrite.", "Delete this.", "Bad logic."), 0, "PR"),
-        PvpQuestion("tr4", "What does 'backpressure' prevent?", listOf("Fast producers overwhelming slow consumers", "SQL injection", "DNS spoofing", "Type erasure"), 0, "SYSTEMS"),
-        PvpQuestion("tr5", "When a Kubernetes livenessProbe fails, kubelet:", listOf("Restarts the container", "Deletes the cluster", "Drops TLS", "Clears Git history"), 0, "DEVOPS"),
-        PvpQuestion("tr6", "What is a 'canary deployment'?", listOf("Gradually routing small traffic share to a new release", "Turning off tests", "Deleting staging", "Dropping indexes"), 0, "DEVOPS"),
+        PvpQuestion("tr2", "Log: 'SQLSTATE 40P01: deadlock detected'. Root cause?", listOf("Expired TLS cert", "Disk full", "Two transactions waiting on each other's locks", "Malformed JSON"), 2, "LOGS"),
+        PvpQuestion("tr3", "Best polite PR comment phrasing:", listOf("Wrong code, rewrite.", "Nit: could we extract this helper for clarity?", "Delete this.", "Bad logic."), 1, "PR"),
+        PvpQuestion("tr4", "What does 'backpressure' prevent?", listOf("SQL injection", "DNS spoofing", "Type erasure", "Fast producers overwhelming slow consumers"), 3, "SYSTEMS"),
+        PvpQuestion("tr5", "When a Kubernetes livenessProbe fails, kubelet:", listOf("Deletes the cluster", "Restarts the container", "Drops TLS", "Clears Git history"), 1, "DEVOPS"),
+        PvpQuestion("tr6", "What is a 'canary deployment'?", listOf("Turning off tests", "Deleting staging", "Gradually routing small traffic share to a new release", "Dropping indexes"), 2, "DEVOPS"),
         PvpQuestion("tr7", "Error: 'OutOfMemoryError: Metaspace'. Affected area?", listOf("JVM class metadata region", "TCP handshake", "DNS resolver", "Git merge driver"), 0, "LOGS"),
-        PvpQuestion("tr8", "What is an 'error budget' in SRE?", listOf("Allowable unreliability threshold under SLO", "Cloud billing invoice", "Compiler warning count", "Heap allocation cap"), 0, "SRE")
+        PvpQuestion("tr8", "What is an 'error budget' in SRE?", listOf("Cloud billing invoice", "Compiler warning count", "Heap allocation cap", "Allowable unreliability threshold under SLO"), 3, "SRE")
     )
 }
 

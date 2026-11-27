@@ -148,8 +148,31 @@ interface AcademicTermDao {
                 limit = limit,
                 offset = offset
             )
-            if (ftsResults.isNotEmpty() || offset > 0) {
+            if (ftsResults.isNotEmpty()) {
                 return ftsResults
+            }
+            if (offset > 0) {
+                val hasAnyFtsMatch = executeSearchPaginated(
+                    cleanQuery = cleanQuery,
+                    ftsMatchExpr = ftsQuery,
+                    useSubstringFallback = false,
+                    majorCategory = majorCategory,
+                    domain = domain,
+                    subdomain = subdomain,
+                    difficulty = difficulty,
+                    cefr = cefr,
+                    partOfSpeech = partOfSpeech,
+                    onlyFavorites = onlyFavorites,
+                    onlyDue = onlyDue,
+                    onlyDifficult = onlyDifficult,
+                    studyFilter = studyFilter,
+                    nowMillis = nowMillis,
+                    limit = 1,
+                    offset = 0
+                ).isNotEmpty()
+                if (hasAnyFtsMatch) {
+                    return emptyList()
+                }
             }
         }
         return executeSearchPaginated(
@@ -206,16 +229,17 @@ interface AcademicTermDao {
             studyFilter = studyFilter,
             nowMillis = nowMillis
         )
+        val escapedPrefix = escapeLikePattern(cleanQuery) + "%"
         val orderBy = if (cleanQuery.isNotEmpty()) {
             args.add(cleanQuery)
             args.add(cleanQuery)
-            args.add("$cleanQuery%")
+            args.add(escapedPrefix)
             """
             ORDER BY
               CASE
                 WHEN t.normalized_term = ? THEN 0
                 WHEN LOWER(t.abbreviations) = ? THEN 1
-                WHEN t.normalized_term LIKE ? THEN 2
+                WHEN t.normalized_term LIKE ? ESCAPE '\' THEN 2
                 ELSE 3
               END ASC,
               t.normalized_term ASC
@@ -357,19 +381,24 @@ interface AcademicTermDao {
             args.add(nowMillis)
         }
         if (onlyDifficult != 0) {
-            clauses.add("(t.ease_factor < 2.2 OR t.difficulty_level IN ('Expert', 'Research Level'))")
+            clauses.add("(t.ease_factor < 2.2 OR t.difficulty_level IN ('Advanced', 'Expert', 'Research Level'))")
         }
         when (studyFilter) {
             1 -> clauses.add("t.repetitions >= 1")
             2 -> clauses.add("t.repetitions = 0")
         }
         if (useSubstringFallback && cleanQuery.isNotEmpty()) {
-            val contains = "%$cleanQuery%"
-            clauses.add("t.normalized_search LIKE ?")
+            val contains = "%${escapeLikePattern(cleanQuery)}%"
+            clauses.add("t.normalized_search LIKE ? ESCAPE '\\'")
             args.add(contains)
         }
         return Triple(fromClause, clauses.joinToString(" AND "), args)
     }
+
+    private fun escapeLikePattern(raw: String): String =
+        raw.replace("\\", "\\\\")
+            .replace("%", "\\%")
+            .replace("_", "\\_")
 
     @Query("SELECT * FROM academic_terms WHERE id = :id")
     suspend fun getById(id: Int): AcademicTermEntity?

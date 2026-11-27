@@ -27,6 +27,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 
@@ -100,6 +101,9 @@ fun DifficultyBadge(
             text = difficulty,
             style = MonoTagTextStyle,
             color = fg,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
@@ -122,6 +126,9 @@ fun PartOfSpeechBadge(
             text = partOfSpeech,
             style = MonoTagTextStyle,
             color = fg,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
         )
     }
@@ -206,30 +213,33 @@ fun HighlightedExampleQuoteCard(
     exampleEn: String,
     targetTerm: String,
     exampleRu: String? = null,
-    accentBarColor: Color = MaterialTheme.colorScheme.primary,
+    accentBarColor: Color = TechColors.Cyan,
     modifier: Modifier = Modifier
 ) {
-    val containerBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-    val effectiveAccent = ensureAccessibleAccent(accentBarColor, MaterialTheme.colorScheme.surface)
-    val mutedColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val highlighted = remember(exampleEn, targetTerm, effectiveAccent, mutedColor) {
+    val isDark = LocalTechInteractionConfig.current.isDarkTheme
+    val containerBg = if (isDark) TechColors.TerminalObsidian else TechColors.TerminalSlate
+    val effectiveAccent = ensureAccessibleAccent(accentBarColor, containerBg)
+    val textColor = Color(0xFFF8FAFC)
+    val secondaryTextColor = Color(0xFFCBD5E1)
+    val highlighted = remember(exampleEn, targetTerm, effectiveAccent) {
         buildHighlightedExampleAnnotatedString(
             example = exampleEn,
             targetTerm = targetTerm,
-            accentColor = effectiveAccent,
-            mutedColor = mutedColor
+            accentColor = Color(0xFF7DD3FC),
+            mutedColor = textColor
         )
     }
 
     Surface(
-        shape = MaterialTheme.shapes.medium,
+        shape = RoundedCornerShape(16.dp),
         color = containerBg,
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF242B42) else Color(0xFF1E293B)),
         modifier = modifier.fillMaxWidth()
     ) {
         Row(modifier = Modifier.height(IntrinsicSize.Min)) {
             Box(
                 modifier = Modifier
-                    .width(4.dp)
+                    .width(3.dp)
                     .fillMaxHeight()
                     .background(effectiveAccent)
             )
@@ -242,7 +252,7 @@ fun HighlightedExampleQuoteCard(
                 Text(
                     text = "ПРИМЕР ИСПОЛЬЗОВАНИЯ",
                     style = MonoTagTextStyle,
-                    color = effectiveAccent
+                    color = TechColors.Cyan
                 )
                 Text(
                     text = highlighted,
@@ -252,7 +262,7 @@ fun HighlightedExampleQuoteCard(
                     Text(
                         text = exampleRu,
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = secondaryTextColor
                     )
                 }
             }
@@ -270,9 +280,9 @@ fun TranslationContainerCard(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(
@@ -311,9 +321,9 @@ fun PracticalExplanationCard(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.35f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.42f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.30f)),
         modifier = modifier.fillMaxWidth()
     ) {
         Column(

@@ -12,9 +12,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -55,6 +57,9 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.JetBrainsMonoFontFamily
+import com.techenglish.app.core.designsystem.LocalTechInteractionConfig
+import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.rememberTechHaptics
 
 // =========================================================================
@@ -89,6 +94,7 @@ fun PronunciationTrainerScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Shadowing · Произношение") },
@@ -106,8 +112,9 @@ fun PronunciationTrainerScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             state.availability.statusBannerRu?.let { banner ->
@@ -231,6 +238,9 @@ fun PronunciationTrainerScreen(
                 value = state.manualTranscriptInput,
                 onValueChange = viewModel::updateManualTranscript,
                 label = { Text("Или введите услышанную/произнесённую фразу для пословной проверки") },
+                supportingText = if (state.manualTranscriptInput.isBlank()) {
+                    { Text("Введите текст, чтобы проверить совпадение слов без микрофона") }
+                } else null,
                 modifier = Modifier.fillMaxWidth(),
                 minLines = 2
             )
@@ -248,6 +258,7 @@ fun PronunciationTrainerScreen(
             }
 
             state.evaluation?.let { eval ->
+                val isDark = LocalTechInteractionConfig.current.isDarkTheme
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
@@ -266,13 +277,23 @@ fun PronunciationTrainerScreen(
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             eval.wordStatuses.forEach { ws ->
+                                val chipBg = when {
+                                    ws.isCorrect && isDark -> TechColors.EmeraldContainerDark
+                                    ws.isCorrect -> TechColors.EmeraldContainerLight
+                                    else -> MaterialTheme.colorScheme.errorContainer
+                                }
+                                val chipFg = when {
+                                    ws.isCorrect && isDark -> TechColors.OnEmeraldContainerDark
+                                    ws.isCorrect -> TechColors.OnEmeraldContainerLight
+                                    else -> MaterialTheme.colorScheme.onErrorContainer
+                                }
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = if (ws.isCorrect) Color(0xFF1F6F3D) else Color(0xFF8B2635)
+                                    color = chipBg
                                 ) {
                                     Text(
                                         text = ws.referenceWord,
-                                        color = Color.White,
+                                        color = chipFg,
                                         fontFamily = JetBrainsMonoFontFamily,
                                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         style = MaterialTheme.typography.bodyMedium

@@ -3,6 +3,7 @@ package com.techenglish.app.feature.profile
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -33,15 +34,23 @@ internal fun ProfileNameDialog(
                 value = nameInput,
                 onValueChange = { nameInput = it },
                 label = { Text("Как к вам обращаться?") },
+                supportingText = if (nameInput.isBlank()) {
+                    { Text("Введите имя профиля") }
+                } else null,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .imePadding()
             )
         },
         confirmButton = {
-            Button(onClick = {
-                onSave(nameInput)
-                onDismiss()
-            }) { Text("Сохранить") }
+            Button(
+                onClick = {
+                    onSave(nameInput.trim())
+                    onDismiss()
+                },
+                enabled = nameInput.isNotBlank()
+            ) { Text("Сохранить") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Отмена") }

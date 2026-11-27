@@ -282,6 +282,31 @@ class SettingsRepositoryImpl @Inject constructor(
         dataStore.setAllowFriendPings(allowed)
     override suspend fun setAiConsentAccepted(accepted: Boolean) =
         dataStore.setAiConsentAccepted(accepted)
+    override suspend fun setInitialSetupCompleted(completed: Boolean) =
+        dataStore.setInitialSetupCompleted(completed)
+    override suspend fun setLocalUsername(username: String) =
+        dataStore.setLocalUsername(username)
+    override suspend fun setDeveloperRole(role: String) =
+        dataStore.setDeveloperRole(role)
+    override suspend fun setPendingProfileSync(pending: Boolean) =
+        dataStore.setPendingProfileSync(pending)
+    override suspend fun completeInitialSetup(
+        localUsername: String,
+        displayName: String,
+        developerRole: String,
+        dailyGoal: Int,
+        translationLanguage: TranslationLanguage,
+        themeMode: ThemeMode,
+        pendingProfileSync: Boolean
+    ) = dataStore.completeInitialSetup(
+        localUsername = localUsername,
+        displayName = displayName,
+        developerRole = developerRole,
+        dailyGoal = dailyGoal,
+        translationLanguage = translationLanguage.name,
+        themeMode = themeMode.name,
+        pendingProfileSync = pendingProfileSync
+    )
 }
 
 @Singleton

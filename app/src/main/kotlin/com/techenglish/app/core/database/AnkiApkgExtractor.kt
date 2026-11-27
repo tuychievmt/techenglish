@@ -34,9 +34,14 @@ class AnkiApkgExtractor @Inject constructor(
                         !entry.name.contains("..") &&
                         (cleanName == "collection.anki2" || cleanName == "collection.anki21")
                     ) {
+                        var totalExtractedBytes = 0L
                         FileOutputStream(tempDbFile).use { fos ->
                             var read = zis.read(buffer)
                             while (read > 0) {
+                                totalExtractedBytes += read
+                                if (totalExtractedBytes > MAX_EXTRACTED_DB_BYTES) {
+                                    throw IllegalArgumentException("Размер базы внутри .apkg превышает допустимый лимит (50 МБ).")
+                                }
                                 fos.write(buffer, 0, read)
                                 read = zis.read(buffer)
                             }
@@ -60,7 +65,7 @@ class AnkiApkgExtractor @Inject constructor(
             SQLiteDatabase.openDatabase(
                 tempDbFile.absolutePath,
                 null,
-                SQLiteDatabase.OPEN_READONLY
+                SQLiteDatabase.OPEN_READONLY or SQLiteDatabase.NO_LOCALIZED_COLLATORS
             ).use { db ->
                 db.rawQuery("SELECT flds, tags FROM notes", null).use { cursor ->
                     val fldsIdx = cursor.getColumnIndex("flds")
@@ -76,7 +81,12 @@ class AnkiApkgExtractor @Inject constructor(
             }
             return rows
         } finally {
+            runCatching { SQLiteDatabase.deleteDatabase(tempDbFile) }
             runCatching { tempDbFile.delete() }
         }
+    }
+
+    companion object {
+        private const val MAX_EXTRACTED_DB_BYTES = 50L * 1024L * 1024L
     }
 }

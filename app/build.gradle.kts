@@ -56,10 +56,14 @@ android {
         val apiBaseUrl = (project.findProperty("API_BASE_URL")?.toString()?.takeIf { it.isNotBlank() }
             ?: System.getenv("API_BASE_URL")?.takeIf { it.isNotBlank() }
             ?: "https://techenglish-trwk.onrender.com").trim().trimEnd('/').replace("\"", "\\\"")
+        val otaManifestFallbackUrl = (project.findProperty("OTA_MANIFEST_FALLBACK_URL")?.toString()?.takeIf { it.isNotBlank() }
+            ?: System.getenv("OTA_MANIFEST_FALLBACK_URL")?.takeIf { it.isNotBlank() }
+            ?: "https://raw.githubusercontent.com/tuychievmt/techenglish/main/ota/latest.json").trim().replace("\"", "\\\"")
         buildConfigField("boolean", "CRASH_REPORTING_ENABLED", crashReportingEnabled.toString())
         buildConfigField("String", "SENTRY_DSN", "\"$sentryDsn\"")
         buildConfigField("boolean", "TAJIK_UI_LOCALIZATION_ENABLED", tajikUiEnabled.toString())
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
+        buildConfigField("String", "OTA_MANIFEST_FALLBACK_URL", "\"$otaManifestFallbackUrl\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

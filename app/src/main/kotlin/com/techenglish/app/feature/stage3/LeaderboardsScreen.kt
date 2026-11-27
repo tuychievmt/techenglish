@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -46,6 +47,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.database.entity.LeaderboardCacheEntity
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.domain.model.LeaderboardTab
 
 // =========================================================================
@@ -87,6 +89,7 @@ fun LeaderboardsContent(
     val pinnedCurrentUser = state.entries.firstOrNull { it.isCurrentUser && it.rank > 10 }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Лидерборды Top-10 и Лиги") },
@@ -108,7 +111,7 @@ fun LeaderboardsContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -144,7 +147,7 @@ fun LeaderboardsContent(
                     ) {
                         Icon(Icons.Rounded.EmojiEvents, contentDescription = null, tint = TechColors.AmberDark)
                         Text(
-                            text = "Сброс лиг: понедельник 00:00 Asia/Dushanbe (старт недели: ${state.weekStartUtc5Label}). Топ-3 ↑, последние 3 ↓.",
+                            text = "Сброс лиг: понедельник 00:00 Asia/Dushanbe (старт недели: ${state.weekStartUtc5Label}). Топ-3 повышаются, последние 3 понижаются.",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

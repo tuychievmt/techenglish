@@ -6,13 +6,16 @@ import com.techenglish.app.core.audio.TechAudioController
 import com.techenglish.app.core.audio.TtsVoiceStatus
 import com.techenglish.app.core.notifications.NotificationHelper
 import com.techenglish.app.core.notifications.NotificationScheduler
+import com.techenglish.app.core.security.AndroidKeystoreTokenStore
 import com.techenglish.domain.model.DailyProgress
 import com.techenglish.domain.model.ThemeMode
 import com.techenglish.domain.model.TranslationLanguage
 import com.techenglish.domain.model.UserSettings
+import com.techenglish.domain.model.UserStats
 import com.techenglish.domain.repository.SettingsRepository
 import com.techenglish.domain.repository.VocabularyRepository
 import com.techenglish.domain.usecase.GetDailyProgressUseCase
+import com.techenglish.domain.usecase.GetStatisticsUseCase
 import com.techenglish.domain.usecase.UpdateSettingsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -28,17 +31,24 @@ import javax.inject.Inject
 data class ProfileUiState(
     val settings: UserSettings = UserSettings(),
     val dailyProgress: DailyProgress? = null,
-    val hasNotificationPermission: Boolean = true
-)
+    val userStats: UserStats? = null,
+    val hasNotificationPermission: Boolean = true,
+    val cloudUsername: String? = null
+) {
+    val displayUsername: String?
+        get() = cloudUsername ?: settings.localUsername.trim().takeIf { it.isNotBlank() }
+}
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
     settingsRepository: SettingsRepository,
     getDailyProgress: GetDailyProgressUseCase,
+    getStatistics: GetStatisticsUseCase,
     private val updateSettings: UpdateSettingsUseCase,
     private val vocabularyRepository: VocabularyRepository,
     private val notificationScheduler: NotificationScheduler,
     private val notificationHelper: NotificationHelper,
+    tokenStore: AndroidKeystoreTokenStore,
     val audioController: TechAudioController
 ) : ViewModel() {
 
@@ -49,12 +59,16 @@ class ProfileViewModel @Inject constructor(
 
     val uiState: StateFlow<ProfileUiState> = combine(
         settingsRepository.observeSettings(),
-        getDailyProgress()
-    ) { settings, daily ->
+        getDailyProgress(),
+        getStatistics(),
+        tokenStore.sessionFlow
+    ) { settings, daily, stats, session ->
         ProfileUiState(
             settings = settings,
             dailyProgress = daily,
-            hasNotificationPermission = notificationHelper.hasNotificationPermission()
+            userStats = stats,
+            hasNotificationPermission = notificationHelper.hasNotificationPermission(),
+            cloudUsername = session.username.trim().takeIf { !session.isGuest && it.isNotBlank() }
         )
     }.stateIn(
         scope = viewModelScope,

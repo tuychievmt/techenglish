@@ -1,0 +1,9 @@
+{
+  "latest_version_code": 310,
+  "latest_version_name": "3.1.0",
+  "min_supported_version_code": 310,
+  "force_update": false,
+  "apk_url": "https://github.com/tuychievmt/techenglish/releases/latest/download/app-standalone-release.apk",
+  "apk_sha256": "",
+  "changelog_ru": "• Обновлён интерфейс Obsidian Aurora и Ceramic Glass\n• Улучшена стабильность синхронизации и офлайн-словаря\n• Добавлена встроенная система проверки и установки обновлений"
+}

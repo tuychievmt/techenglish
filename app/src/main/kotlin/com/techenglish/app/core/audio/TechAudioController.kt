@@ -14,6 +14,7 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +24,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.security.MessageDigest
@@ -74,9 +77,13 @@ class TechAudioController @Inject constructor(
     val playbackState: StateFlow<AudioPlaybackState> = _playbackState.asStateFlow()
 
     private var tts: TextToSpeech? = null
+    @Volatile
     private var ttsReady: Boolean = false
     private var exoPlayer: ExoPlayer? = null
     private var progressJob: Job? = null
+    private var synthesisJob: Job? = null
+    @Volatile
+    private var currentPlaybackIsRemote: Boolean = false
     private var lastSynthesizedFile: File? = null
     private val synthesisWaiters = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
@@ -97,12 +104,14 @@ class TechAudioController @Inject constructor(
                 setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {
                         if (utteranceId?.startsWith("direct_") == true) {
-                            _playbackState.value = _playbackState.value.copy(
-                                isPlaying = true,
-                                isPaused = false,
-                                usingMedia3 = false,
-                                errorMessage = null
-                            )
+                            _playbackState.update {
+                                it.copy(
+                                    isPlaying = true,
+                                    isPaused = false,
+                                    usingMedia3 = false,
+                                    errorMessage = null
+                                )
+                            }
                         }
                     }
 
@@ -110,11 +119,13 @@ class TechAudioController @Inject constructor(
                         if (utteranceId == null) return
                         synthesisWaiters.remove(utteranceId)?.complete(true)
                         if (utteranceId.startsWith("direct_")) {
-                            _playbackState.value = _playbackState.value.copy(
-                                isPlaying = false,
-                                isPaused = false,
-                                progress = 1f
-                            )
+                            _playbackState.update {
+                                it.copy(
+                                    isPlaying = false,
+                                    isPaused = false,
+                                    progress = 1f
+                                )
+                            }
                         }
                     }
 
@@ -139,12 +150,17 @@ class TechAudioController @Inject constructor(
     private fun handleUtteranceError(utteranceId: String?) {
         if (utteranceId != null) {
             synthesisWaiters.remove(utteranceId)?.complete(false)
+            if (utteranceId.startsWith("synth_")) {
+                return
+            }
         }
-        _playbackState.value = _playbackState.value.copy(
-            isPlaying = false,
-            isPaused = false,
-            errorMessage = "Не удалось воспроизвести аудио. Проверьте установленный английский голосовой пакет."
-        )
+        _playbackState.update {
+            it.copy(
+                isPlaying = false,
+                isPaused = false,
+                errorMessage = "Не удалось воспроизвести аудио. Проверьте установленный английский голосовой пакет."
+            )
+        }
     }
 
     private fun configureEnglishVoice(targetLocaleTag: String = _playbackState.value.speechLocaleTag) {
@@ -282,17 +298,22 @@ class TechAudioController @Inject constructor(
             return
         }
 
-        _playbackState.value = _playbackState.value.copy(
-            currentText = clean,
-            isPlaying = true,
-            isPaused = false,
-            playbackSpeed = speed,
-            progress = 0f,
-            errorMessage = null
-        )
+        _playbackState.update {
+            it.copy(
+                currentText = clean,
+                isPlaying = true,
+                isPaused = false,
+                playbackSpeed = speed,
+                progress = 0f,
+                errorMessage = null
+            )
+        }
 
-        scope.launch {
-            val wavFile = synthesizeToCacheWav(engine, clean, speed)
+        synthesisJob?.cancel()
+        synthesisJob = scope.launch {
+            val wavFile = withContext(Dispatchers.IO) {
+                synthesizeToCacheWav(engine, clean, speed)
+            }
             if (wavFile != null && wavFile.exists() && wavFile.length() > 44L) {
                 lastSynthesizedFile = wavFile
                 playFileViaExoPlayer(wavFile, speed)
@@ -358,6 +379,7 @@ class TechAudioController @Inject constructor(
     }
 
     private suspend fun synthesizeToCacheWav(engine: TextToSpeech, text: String, speed: Float): File? {
+        var utteranceId: String? = null
         return try {
             val dir = File(context.cacheDir, "tts_audio").apply { mkdirs() }
             val localeTag = _playbackState.value.speechLocaleTag
@@ -367,17 +389,16 @@ class TechAudioController @Inject constructor(
                 outFile.setLastModified(System.currentTimeMillis())
                 return outFile
             }
-            val utteranceId = "synth_${UUID.randomUUID()}"
+            val id = "synth_${UUID.randomUUID()}"
+            utteranceId = id
             val deferred = CompletableDeferred<Boolean>()
-            synthesisWaiters[utteranceId] = deferred
+            synthesisWaiters[id] = deferred
             engine.setSpeechRate(1.0f)
-            val result = engine.synthesizeToFile(text, Bundle(), outFile, utteranceId)
+            val result = engine.synthesizeToFile(text, Bundle(), outFile, id)
             if (result != TextToSpeech.SUCCESS) {
-                synthesisWaiters.remove(utteranceId)
                 return null
             }
             val done = withTimeoutOrNull(4_000L) { deferred.await() } ?: false
-            synthesisWaiters.remove(utteranceId)
             if (done && outFile.exists() && outFile.length() > 44L) {
                 outFile.setLastModified(System.currentTimeMillis())
                 evictCacheLru(dir)
@@ -385,72 +406,98 @@ class TechAudioController @Inject constructor(
             } else {
                 null
             }
+        } catch (ce: CancellationException) {
+            throw ce
         } catch (_: Throwable) {
             null
+        } finally {
+            utteranceId?.let { synthesisWaiters.remove(it) }
         }
     }
 
-    fun playRemoteAudioUrl(url: String, label: String = "Peer Review Voice") {
-        if (url.isBlank()) return
-        stop()
-        try {
-            val player = exoPlayer ?: ExoPlayer.Builder(context.applicationContext).build().also { created ->
-                exoPlayer = created
-            }
-            player.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
-            player.playbackParameters = PlaybackParameters(1.0f)
-            player.prepare()
-            player.play()
-            _playbackState.value = _playbackState.value.copy(
-                currentText = label,
-                isPlaying = true,
-                isPaused = false,
-                usingMedia3 = true,
-                errorMessage = null
-            )
-            startProgressTicker()
-        } catch (exc: Throwable) {
-            _playbackState.value = _playbackState.value.copy(
-                isPlaying = false,
-                errorMessage = exc.localizedMessage ?: "Не удалось воспроизвести аудио"
-            )
-        }
-    }
-
-    private fun playFileViaExoPlayer(file: File, speed: Float) {
-        try {
-            val player = exoPlayer ?: ExoPlayer.Builder(context.applicationContext).build().also { created ->
-                created.addListener(object : Player.Listener {
-                    override fun onPlaybackStateChanged(state: Int) {
-                        if (state == Player.STATE_ENDED) {
-                            progressJob?.cancel()
-                            _playbackState.value = _playbackState.value.copy(
+    private fun getOrCreateExoPlayer(): ExoPlayer {
+        exoPlayer?.let { return it }
+        return ExoPlayer.Builder(context.applicationContext).build().also { created ->
+            created.addListener(object : Player.Listener {
+                override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_ENDED) {
+                        progressJob?.cancel()
+                        _playbackState.update {
+                            it.copy(
                                 isPlaying = false,
                                 isPaused = false,
                                 progress = 1f
                             )
                         }
                     }
+                }
 
-                    override fun onPlayerError(error: PlaybackException) {
-                        progressJob?.cancel()
-                        // Fall back transparently to direct TTS
+                override fun onPlayerError(error: PlaybackException) {
+                    progressJob?.cancel()
+                    if (currentPlaybackIsRemote) {
+                        _playbackState.update {
+                            it.copy(
+                                isPlaying = false,
+                                isPaused = false,
+                                errorMessage = error.localizedMessage ?: "Не удалось воспроизвести удалённую запись"
+                            )
+                        }
+                    } else {
+                        // Fall back transparently to direct TTS for local term/article audio
                         speakQuick(_playbackState.value.currentText, _playbackState.value.playbackSpeed)
                     }
-                })
-                exoPlayer = created
-            }
+                }
+            })
+            exoPlayer = created
+        }
+    }
 
+    fun playRemoteAudioUrl(url: String, label: String = "Peer Review Voice") {
+        if (url.isBlank()) return
+        stop()
+        currentPlaybackIsRemote = true
+        try {
+            val player = getOrCreateExoPlayer()
+            player.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
+            player.playbackParameters = PlaybackParameters(1.0f)
+            player.prepare()
+            player.play()
+            _playbackState.update {
+                it.copy(
+                    currentText = label,
+                    isPlaying = true,
+                    isPaused = false,
+                    usingMedia3 = true,
+                    errorMessage = null
+                )
+            }
+            startProgressTicker()
+        } catch (exc: Throwable) {
+            _playbackState.update {
+                it.copy(
+                    isPlaying = false,
+                    errorMessage = exc.localizedMessage ?: "Не удалось воспроизвести аудио"
+                )
+            }
+        }
+    }
+
+    private fun playFileViaExoPlayer(file: File, speed: Float) {
+        currentPlaybackIsRemote = false
+        try {
+            val player = getOrCreateExoPlayer()
             player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)))
             player.playbackParameters = PlaybackParameters(speed)
             player.prepare()
             player.play()
-            _playbackState.value = _playbackState.value.copy(
-                isPlaying = true,
-                isPaused = false,
-                usingMedia3 = true,
-                errorMessage = null
-            )
+            _playbackState.update {
+                it.copy(
+                    isPlaying = true,
+                    isPaused = false,
+                    usingMedia3 = true,
+                    errorMessage = null
+                )
+            }
             startProgressTicker()
         } catch (_: Throwable) {
             speakQuick(_playbackState.value.currentText, speed)
@@ -465,13 +512,15 @@ class TechAudioController @Inject constructor(
                 val duration = player.duration.takeIf { it > 0 } ?: 1L
                 val position = player.currentPosition.coerceAtLeast(0L)
                 val fraction = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
-                _playbackState.value = _playbackState.value.copy(progress = fraction)
+                _playbackState.update { it.copy(progress = fraction) }
                 delay(100L)
             }
         }
     }
 
     private fun stopInternal() {
+        synthesisJob?.cancel()
+        synthesisJob = null
         progressJob?.cancel()
         runCatching { exoPlayer?.stop() }
         runCatching { tts?.stop() }
@@ -483,11 +532,17 @@ class TechAudioController @Inject constructor(
 
     fun release() {
         stopInternal()
+        synthesisWaiters.values.forEach { it.complete(false) }
+        synthesisWaiters.clear()
         runCatching { exoPlayer?.release() }
         exoPlayer = null
         runCatching { tts?.shutdown() }
         tts = null
         ttsReady = false
+        _playbackState.value = AudioPlaybackState(
+            playbackSpeed = _playbackState.value.playbackSpeed,
+            speechLocaleTag = _playbackState.value.speechLocaleTag
+        )
     }
 
     companion object {

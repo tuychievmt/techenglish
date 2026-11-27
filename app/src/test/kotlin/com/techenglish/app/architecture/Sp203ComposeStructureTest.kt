@@ -110,4 +110,105 @@ class Sp203ComposeStructureTest {
             missingImmutableAnno.isEmpty()
         )
     }
+
+    @Test
+    fun `edge-to-edge navigation avoids double system insets and syncs status bar style`() {
+        val root = findAppKotlinRoot()
+        val navSrc = File(root, "core/navigation/AppNavigation.kt").readText()
+        assertTrue(
+            "AppNavigation.kt NavHost must call consumeWindowInsets(innerPadding) to prevent double system insets",
+            navSrc.contains("consumeWindowInsets")
+        )
+
+        val featureDir = File(root, "feature")
+        val missingZeroInsets = mutableListOf<String>()
+        featureDir.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                val text = file.readText()
+                val scaffoldCount = Regex("""\bScaffold\s*\(""").findAll(text).count()
+                if (scaffoldCount > 0) {
+                    val zeroInsetsCount = Regex("""contentWindowInsets\s*=\s*WindowInsets\(\s*0""").findAll(text).count()
+                    if (zeroInsetsCount < scaffoldCount) {
+                        missingZeroInsets += "${file.relativeTo(root).path}: $zeroInsetsCount/$scaffoldCount Scaffolds set contentWindowInsets = WindowInsets(0, 0, 0, 0)"
+                    }
+                }
+            }
+        assertTrue(
+            "Nested feature Scaffolds missing contentWindowInsets = WindowInsets(0, 0, 0, 0):\n${missingZeroInsets.joinToString("\n")}",
+            missingZeroInsets.isEmpty()
+        )
+
+        val themeSrc = File(root, "core/designsystem/Theme.kt").readText()
+        val mainActivitySrc = File(root, "MainActivity.kt").readText()
+        val combined = themeSrc + "\n" + mainActivitySrc
+        assertTrue(
+            "Theme.kt or MainActivity.kt must sync edge-to-edge system bar style via DisposableEffect",
+            combined.contains("DisposableEffect") && combined.contains("SystemBarStyle")
+        )
+    }
+
+    @Test
+    fun `no raw text emojis or checkmark and star unicode symbols remain in UI screens or Glance widget`() {
+        val root = findAppKotlinRoot()
+        val forbidden = listOf(
+            "\u25B6", // ▶
+            "\u25BA", // ►
+            "\u2605", // ★
+            "\u2606", // ☆
+            "\u2713", // ✓
+            "\u2714", // ✔
+            "\u2717", // ✗
+            "\u2715", // ✕
+            "\uD83D\uDD25", // 🔥
+            "\u26A1", // ⚡
+            "\uD83C\uDFAF", // 🎯
+            "\uD83D\uDCDA" // 📚
+        )
+        val offenders = mutableListOf<String>()
+        File(root, "feature").walkTopDown()
+            .filter {
+                it.isFile && it.extension == "kt" &&
+                    !it.name.endsWith("ViewModel.kt") &&
+                    !it.name.endsWith("ViewModels.kt")
+            }
+            .forEach { file ->
+                val text = file.readText()
+                val found = forbidden.filter { text.contains(it) }
+                if (found.isNotEmpty()) {
+                    offenders += "${file.relativeTo(root).path}: $found"
+                }
+            }
+        assertTrue(
+            "UI screens/widget must use vector icons instead of raw emojis/symbols:\n${offenders.joinToString("\n")}",
+            offenders.isEmpty()
+        )
+    }
+
+    @Test
+    fun `design system consistency regression checks for Vocabulary, AcademicDictionary, and TerminalSearchField`() {
+        val root = findAppKotlinRoot()
+        val vocabSrc = File(root, "feature/vocabulary/VocabularyScreen.kt").readText()
+        assertTrue(
+            "VocabularyScreen.kt must not hardcode stale '20 658' count",
+            !vocabSrc.contains("20 658") && !vocabSrc.contains("20658")
+        )
+
+        val academicCompSrc = File(root, "feature/academic/AcademicComponents.kt").readText()
+        val academicDictSrc = File(root, "feature/academic/AcademicDictionaryScreen.kt").readText()
+        assertTrue(
+            "AcademicComponents.kt must use flagship AudioEqualizerButton and BentoGlassCard",
+            academicCompSrc.contains("AudioEqualizerButton") && academicCompSrc.contains("BentoGlassCard")
+        )
+        assertTrue(
+            "AcademicDictionaryScreen.kt must use Icons.Rounded.PlayArrow and BentoGlassCard",
+            academicDictSrc.contains("Icons.Rounded.PlayArrow") && academicDictSrc.contains("BentoGlassCard")
+        )
+
+        val searchSrc = File(root, "core/designsystem/TechIconsAndHaptics.kt").readText()
+        assertTrue(
+            "TerminalSearchField must enforce singleLine = true and TextOverflow.Ellipsis",
+            searchSrc.contains("singleLine = true") && searchSrc.contains("TextOverflow.Ellipsis")
+        )
+    }
 }

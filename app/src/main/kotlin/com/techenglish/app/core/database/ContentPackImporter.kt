@@ -264,13 +264,13 @@ class ContentPackImporter @Inject constructor(
             }
 
             if (payload.scenarios.isNotEmpty()) {
-                scenarioDao.insertAll(payload.scenarios)
+                scenarioDao.upsertAll(payload.scenarios)
             }
             if (payload.workPhrases.isNotEmpty()) {
-                phraseDao.insertAll(payload.workPhrases)
+                phraseDao.upsertAll(payload.workPhrases)
             }
             if (payload.codeSnippets.isNotEmpty()) {
-                snippetDao.insertAll(payload.codeSnippets)
+                snippetDao.upsertAll(payload.codeSnippets)
             }
         }
 

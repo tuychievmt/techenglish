@@ -71,6 +71,7 @@ class ThematicRoomsViewModel @Inject constructor(
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     private var wsJob: Job? = null
+    private var syncJob: Job? = null
 
     val uiState: StateFlow<ThematicRoomsUiState> = combine(
         selectedRoomFlow,
@@ -150,8 +151,9 @@ class ThematicRoomsViewModel @Inject constructor(
 
     private fun connectAndSyncRoom(room: ThematicRoomChannel) {
         wsJob?.cancel()
+        syncJob?.cancel()
         wsStateFlow.value = WsConnectionState.DISCONNECTED
-        viewModelScope.launch {
+        syncJob = viewModelScope.launch {
             if (!apiClient.isNetworkAvailable() || tokenStore.getAccessToken().isNullOrBlank()) return@launch
             flushPendingRoomMessages()
             runCatching {

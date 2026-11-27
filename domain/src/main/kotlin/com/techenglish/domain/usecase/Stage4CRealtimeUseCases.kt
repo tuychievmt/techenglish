@@ -29,7 +29,7 @@ class EvaluatePvpDuelUseCase @Inject constructor() {
                 opponentScore = opponentScore,
                 rankedXpAwarded = 0,
                 ratingDelta = 0,
-                summaryRu = "Тренировочный раунд завершён ($playerScore/$opponentScore). Рейтинговые очки не начисляются."
+                summaryRu = "Тренировочный раунд завершён (Вы $playerScore : $opponentScore Соперник). Рейтинговые очки не начисляются."
             )
         }
         val (xp, delta, summary) = when {

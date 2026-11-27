@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -59,6 +60,7 @@ import com.techenglish.app.core.designsystem.DifficultyBadge
 import com.techenglish.app.core.designsystem.EmptyStateView
 import com.techenglish.app.core.designsystem.HighlightedExampleQuoteCard
 import com.techenglish.app.core.designsystem.IpaTextStyle
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.PartOfSpeechBadge
 import com.techenglish.app.core.designsystem.PracticalExplanationCard
@@ -90,6 +92,7 @@ fun AcademicTermDetailScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -121,7 +124,7 @@ fun AcademicTermDetailScreen(
                             viewModel.switchAccent(next)
                         }
                     ) {
-                        Text(currentLocale, style = MonoTagTextStyle)
+                        Text(currentLocale, style = MonoTagTextStyle, maxLines = 1, softWrap = false)
                     }
                 }
             )
@@ -146,7 +149,7 @@ fun AcademicTermDetailScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // 1. Primary Hero Screen (Progressive Disclosure First Layer: Term -> Translation -> Short Example -> Audio)
@@ -247,7 +250,7 @@ fun AcademicTermDetailScreen(
                         ) {
                             Icon(Icons.Rounded.CheckCircle, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(if (term.isMastered) "Изучено ✓" else "Mark as Learned")
+                            Text(if (term.isMastered) "Изучено" else "Mark as Learned")
                         }
                     }
                 }

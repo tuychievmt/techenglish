@@ -1,22 +1,17 @@
 package com.techenglish.app.feature.stage4b
 
-import android.app.Activity
-import android.content.Intent
-import android.speech.RecognizerIntent
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,15 +20,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.automirrored.rounded.Send
-import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Groups
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.PrivacyTip
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.WorkspacePremium
 import androidx.compose.material3.Button
@@ -41,7 +32,6 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,9 +40,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -73,331 +60,9 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.feature.stage3.OfflineModeBanner
-import com.techenglish.domain.model.AiInterviewLevel
-import com.techenglish.domain.model.AiInterviewRole
 import com.techenglish.domain.model.DictionaryPrStatus
-
-// =========================================================================
-// 1. AI Mock Interviewer & AI Code/PR Reviewer Screen (ФТ-8.1–8.3)
-// =========================================================================
-
-@Composable
-fun AiMentorScreen(
-    onBack: () -> Unit,
-    viewModel: AiMentorViewModel = hiltViewModel()
-) {
-    val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
-
-    LaunchedEffect(Unit) {
-        viewModel.events.collect { snackbarHostState.showSnackbar(it) }
-    }
-
-    AiMentorContent(
-        state = state,
-        snackbarHostState = snackbarHostState,
-        onBack = onBack,
-        onAcceptConsent = viewModel::acceptAiConsent,
-        onSelectTab = viewModel::selectTab,
-        onSelectRole = viewModel::selectRole,
-        onSelectLevel = viewModel::selectLevel,
-        onSubmitInterview = viewModel::submitInterviewAnswer,
-        onSubmitPrReview = viewModel::submitPrReview
-    )
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
-@Composable
-fun AiMentorContent(
-    state: AiMentorUiState,
-    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
-    onBack: () -> Unit,
-    onAcceptConsent: () -> Unit,
-    onSelectTab: (Int) -> Unit,
-    onSelectRole: (AiInterviewRole) -> Unit,
-    onSelectLevel: (AiInterviewLevel) -> Unit,
-    onSubmitInterview: (String) -> Unit,
-    onSubmitPrReview: (String) -> Unit
-) {
-    var interviewInput by remember { mutableStateOf("") }
-    var prDraftInput by remember { mutableStateOf("") }
-
-    // On-device speech-to-text launcher (ФТ-8.1/8.3: audio stays local, only text is sent to FastAPI proxy)
-    val speechLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.StartActivityForResult()
-    ) { res ->
-        if (res.resultCode == Activity.RESULT_OK) {
-            val matches = res.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
-            val transcript = matches?.firstOrNull().orEmpty()
-            if (transcript.isNotBlank()) {
-                interviewInput = if (interviewInput.isBlank()) transcript else "$interviewInput $transcript"
-            }
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("AI-ментор (Интервью и PR Review)") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = "Назад")
-                    }
-                }
-            )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (state.isOffline) {
-                item {
-                    OfflineModeBanner("Офлайн-режим: AI-прокси работает онлайн; локальные тренажёры доступны без сети.")
-                }
-            }
-
-            // Explicit Consent Gate (ФТ-8.3)
-            if (!state.consentAccepted) {
-                item {
-                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(Icons.Rounded.PrivacyTip, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Text("Согласие на обработку текста AI-прокси (ФТ-8.3)", style = MaterialTheme.typography.titleMedium)
-                            }
-                            Text(
-                                text = "• Запросы идут строго через серверный FastAPI-прокси (без API-ключей в приложении).\n" +
-                                    "• Персональные данные профиля (email, username, ссылки) автоматически удаляются.\n" +
-                                    "• Голосовой ввод распознаётся на устройстве — аудиозаписи НЕ сохраняются и не отправляются.\n" +
-                                    "• Действует серверный дневной лимит (${state.dailyLimit} запросов/день).",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Button(
-                                onClick = onAcceptConsent,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Принять условия и включить AI-ментора")
-                            }
-                        }
-                    }
-                }
-                return@LazyColumn
-            }
-
-            // Quota banner + Mode Switcher
-            item {
-                Surface(
-                    shape = MaterialTheme.shapes.medium,
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Icon(Icons.Rounded.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                            Text("Серверный AI-прокси • PII скрыт • Аудио 0 дн.", style = MaterialTheme.typography.labelMedium)
-                        }
-                        Text(
-                            text = "${state.remainingDailyQuota}/${state.dailyLimit}",
-                            style = MonoTagTextStyle,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
-            }
-
-            item {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                    SegmentedButton(
-                        selected = state.selectedTabIndex == 0,
-                        onClick = { onSelectTab(0) },
-                        shape = SegmentedButtonDefaults.itemShape(0, 2)
-                    ) { Text("Mock Interview") }
-                    SegmentedButton(
-                        selected = state.selectedTabIndex == 1,
-                        onClick = { onSelectTab(1) },
-                        shape = SegmentedButtonDefaults.itemShape(1, 2)
-                    ) { Text("Code / PR Reviewer") }
-                }
-            }
-
-            if (state.selectedTabIndex == 0) {
-                // ФТ-8.1 AI Mock Interviewer
-                item {
-                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text("Роль и уровень:", style = MaterialTheme.typography.labelLarge)
-                            FlowRow(
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                AiInterviewRole.entries.forEach { role ->
-                                    FilterChip(
-                                        selected = state.role == role,
-                                        onClick = { onSelectRole(role) },
-                                        label = { Text(role.labelRu, maxLines = 1) }
-                                    )
-                                }
-                            }
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                AiInterviewLevel.entries.forEach { lvl ->
-                                    FilterChip(
-                                        selected = state.level == lvl,
-                                        onClick = { onSelectLevel(lvl) },
-                                        label = { Text(lvl.labelRu) }
-                                    )
-                                }
-                            }
-                            HorizontalDivider()
-                            Text("Вопрос интервьюера (EN):", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            Text(state.currentQuestionEn, style = MaterialTheme.typography.titleSmall)
-
-                            OutlinedTextField(
-                                value = interviewInput,
-                                onValueChange = { interviewInput = it },
-                                label = { Text("Ваш ответ на английском (текст или диктовка)") },
-                                minLines = 3,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak your interview answer in English")
-                                        }
-                                        runCatching { speechLauncher.launch(intent) }
-                                    }
-                                ) {
-                                    Icon(Icons.Rounded.Mic, contentDescription = "Голосовой ввод", modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("Голос")
-                                }
-                                Button(
-                                    onClick = {
-                                        onSubmitInterview(interviewInput)
-                                        interviewInput = ""
-                                    },
-                                    enabled = interviewInput.trim().length >= 5 && !state.isBusy,
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Icon(Icons.AutoMirrored.Rounded.Send, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.width(6.dp))
-                                    Text("Отправить ответ")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                items(state.interviewTurns, key = { it.id }) { turn ->
-                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Text(
-                                text = "English: ${turn.englishScore}/100 • Tech: ${turn.technicalScore}/100",
-                                style = MonoTagTextStyle,
-                                color = TechColors.EmeraldDark
-                            )
-                            if (turn.isFallback) {
-                                Text(
-                                    text = "Резервный эвристический разбор" +
-                                        (turn.fallbackReason?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.secondary
-                                )
-                            }
-                            Text(turn.feedbackRu, style = MaterialTheme.typography.bodyMedium)
-                            HorizontalDivider()
-                            Text("Улучшенная формулировка (EN):", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                            Text(turn.improvedAnswerEn, style = MaterialTheme.typography.bodySmall)
-                        }
-                    }
-                }
-            } else {
-                // ФТ-8.2 AI Code / PR Reviewer
-                item {
-                    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                        Column(
-                            modifier = Modifier.padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Text("Проверка комментария для Pull Request / Code Review", style = MaterialTheme.typography.titleMedium)
-                            OutlinedTextField(
-                                value = prDraftInput,
-                                onValueChange = { prDraftInput = it },
-                                label = { Text("Вставьте ваш черновик комментария на английском") },
-                                minLines = 3,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                            Button(
-                                onClick = { onSubmitPrReview(prDraftInput) },
-                                enabled = prDraftInput.trim().length >= 5 && !state.isBusy,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Text("Улучшить формулировку и тон")
-                            }
-                        }
-                    }
-                }
-
-                state.prReviewFeedback?.let { fb ->
-                    item {
-                        ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                            Column(
-                                modifier = Modifier.padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                if (fb.isFallback) {
-                                    Text(
-                                        text = "Резервный эвристический разбор" +
-                                            (fb.fallbackReason?.takeIf { it.isNotBlank() }?.let { " ($it)" } ?: ""),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.secondary
-                                    )
-                                }
-                                Text("Оценка тона:", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
-                                Text(fb.toneAssessmentRu, style = MaterialTheme.typography.bodyMedium)
-                                HorizontalDivider()
-                                Text("Рекомендуемый вариант (EN):", style = MaterialTheme.typography.labelLarge, color = TechColors.EmeraldDark)
-                                Text(fb.improvedEnglishText, style = MaterialTheme.typography.bodyMedium)
-                                fb.keySuggestionsRu.forEach { tip ->
-                                    Text("• $tip", style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
 
 // =========================================================================
 // 2. Squads Screen (ФТ-14.4: 5–10 devs, Weekly Goal, Non-Ranked Bonus)
@@ -441,6 +106,7 @@ fun SquadsContent(
     var inviteCode by remember { mutableStateOf("") }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Учебные отряды (Squads)") },
@@ -461,8 +127,9 @@ fun SquadsContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -503,6 +170,9 @@ fun SquadsContent(
                                 value = squadName,
                                 onValueChange = { squadName = it },
                                 label = { Text("Название отряда (например, Kotlin Guild)") },
+                                supportingText = if (squadName.trim().length < 3) {
+                                    { Text("Минимум 3 символа") }
+                                } else null,
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -522,6 +192,9 @@ fun SquadsContent(
                                 value = inviteCode,
                                 onValueChange = { inviteCode = it },
                                 label = { Text("Код приглашения (SQ-XXXXXX)") },
+                                supportingText = if (inviteCode.trim().length < 4) {
+                                    { Text("Введите код от 4 символов") }
+                                } else null,
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth()
                             )
@@ -572,7 +245,7 @@ fun SquadsContent(
                             )
                             Text(
                                 text = "Недельная цель: ${squad.currentWeekXp} / ${squad.weeklyGoalXp} XP" +
-                                    if (!squad.isActiveForChallenge) " (нужно ≥ 5 участников для активации)" else " • Челлендж активен ✓",
+                                    if (!squad.isActiveForChallenge) " (нужно ≥ 5 участников для активации)" else " • Челлендж активен",
                                 style = MaterialTheme.typography.bodySmall
                             )
                             OutlinedButton(onClick = onLeaveSquad, modifier = Modifier.fillMaxWidth()) {
@@ -650,6 +323,7 @@ fun CrowdsourcePrContent(
     var licenseAccepted by remember { mutableStateOf(false) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("PR в словарь (Краудсорсинг)") },
@@ -670,8 +344,9 @@ fun CrowdsourcePrContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -696,7 +371,7 @@ fun CrowdsourcePrContent(
                                 tint = if (elig.isEligible) TechColors.EmeraldDark else TechColors.AmberDark
                             )
                             Text(
-                                text = if (elig.isEligible) "Допуск к «PR в словарь» открыт ✓" else "Условия допуска Contributor (ФТ-14.3)",
+                                text = if (elig.isEligible) "Допуск к «PR в словарь» открыт" else "Условия допуска Contributor (ФТ-14.3)",
                                 style = MaterialTheme.typography.titleMedium
                             )
                         }
@@ -761,6 +436,17 @@ fun CrowdsourcePrContent(
                             Text(
                                 text = "Я соглашаюсь на публикацию вклада под открытой лицензией проекта (CC BY-SA 4.0) для получения бейджа Contributor.",
                                 style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        if (!state.eligibility.isEligible || !licenseAccepted || term.isBlank()) {
+                            Text(
+                                text = when {
+                                    !state.eligibility.isEligible -> "Доступно после выполнения 4 условий Contributor выше"
+                                    term.isBlank() -> "Укажите английский термин для PR"
+                                    else -> "Подтвердите лицензию CC BY-SA 4.0 для отправки"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         Button(

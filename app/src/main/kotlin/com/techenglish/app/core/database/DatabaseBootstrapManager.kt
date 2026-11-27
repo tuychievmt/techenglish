@@ -2,6 +2,7 @@ package com.techenglish.app.core.database
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -127,6 +128,10 @@ class DatabaseBootstrapManager internal constructor(
                 val ready = DatabaseBootstrapState.Ready(wasFirstRun = true, durationMs = elapsedMs)
                 _state.value = ready
                 ready
+            } catch (ce: CancellationException) {
+                tempFile.delete()
+                _state.value = DatabaseBootstrapState.Idle
+                throw ce
             } catch (exc: Exception) {
                 tempFile.delete()
                 _state.value = DatabaseBootstrapState.Error(

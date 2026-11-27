@@ -497,7 +497,7 @@ class EvaluatePronunciationUseCase @Inject constructor(
                 targetEn = "asynchronous",
                 ipa = "/eɪˈsɪŋ.krə.nəs/",
                 translationRu = "асинхронный",
-                focusNoteRu = "Ударение на второй слог «SING»: эй-СИНК-рэ-нэс."
+                focusNoteRu = "Ударение на второй слог «СИНК»: эй-СИНК-рэ-нэс."
             ),
             ShadowingPrompt(
                 id = "term_poly",
@@ -884,30 +884,61 @@ class DeckImportExportUseCase @Inject constructor(
     }
 
     fun parseJsonDeck(rawJson: String): List<DeckCardEntry> {
-        val objectRegex = Regex("\\{[^{}]*\"term\"[^{}]*\\}")
-        return objectRegex.findAll(rawJson).mapNotNull { match ->
-            val obj = match.value
+        val out = mutableListOf<DeckCardEntry>()
+        var idx = 0
+        while (idx < rawJson.length) {
+            val start = rawJson.indexOf('{', idx)
+            if (start < 0) break
+            var depth = 0
+            var inString = false
+            var escaped = false
+            var end = -1
+            var i = start
+            while (i < rawJson.length) {
+                val ch = rawJson[i]
+                when {
+                    escaped -> escaped = false
+                    inString && ch == '\\' -> escaped = true
+                    ch == '"' -> inString = !inString
+                    !inString && ch == '{' -> depth++
+                    !inString && ch == '}' -> {
+                        depth--
+                        if (depth == 0) {
+                            end = i
+                            break
+                        }
+                    }
+                }
+                i++
+            }
+            if (end <= start) break
+            val obj = rawJson.substring(start, end + 1)
             val term = extractJsonString(obj, "term").trim()
             val translation = extractJsonString(obj, "translation").trim()
-            if (term.isEmpty() || translation.isEmpty()) return@mapNotNull null
-            DeckCardEntry(
-                term = term,
-                transcription = extractJsonString(obj, "transcription").trim(),
-                translation = translation,
-                example = extractJsonString(obj, "example").trim(),
-                explanationRu = extractJsonString(obj, "explanationRu").ifBlank {
-                    extractJsonString(obj, "explanation_ru")
-                }.trim()
-            )
-        }.toList()
+            if (term.isNotEmpty() && translation.isNotEmpty()) {
+                out.add(
+                    DeckCardEntry(
+                        term = term,
+                        transcription = extractJsonString(obj, "transcription").trim(),
+                        translation = translation,
+                        example = extractJsonString(obj, "example").trim(),
+                        explanationRu = extractJsonString(obj, "explanationRu").ifBlank {
+                            extractJsonString(obj, "explanation_ru")
+                        }.trim()
+                    )
+                )
+            }
+            idx = end + 1
+        }
+        return out
     }
 
     fun parseCsvDeck(rawCsv: String): List<DeckCardEntry> {
-        val lines = rawCsv.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        if (lines.isEmpty()) return emptyList()
-        val startIdx = if (lines.first().lowercase(Locale.ROOT).startsWith("term,")) 1 else 0
-        return lines.drop(startIdx).mapNotNull { line ->
-            val cols = splitCsvLine(line)
+        val records = splitCsvRecords(rawCsv).filter { it.any { cell -> cell.isNotBlank() } }
+        if (records.isEmpty()) return emptyList()
+        val firstCell = records.first().firstOrNull().orEmpty().trim().lowercase(Locale.ROOT)
+        val startIdx = if (firstCell == "term") 1 else 0
+        return records.drop(startIdx).mapNotNull { cols ->
             if (cols.size < 2) return@mapNotNull null
             // Supports both (term, translation, ...) and (term, transcription, translation, example, explanation)
             val term = cols[0].trim()
@@ -925,6 +956,45 @@ class DeckImportExportUseCase @Inject constructor(
                 explanationRu = expl
             )
         }
+    }
+
+    private fun splitCsvRecords(rawCsv: String): List<List<String>> {
+        val records = mutableListOf<List<String>>()
+        val currentRow = mutableListOf<String>()
+        val cur = StringBuilder()
+        var inQuotes = false
+        var i = 0
+        while (i < rawCsv.length) {
+            val ch = rawCsv[i]
+            when {
+                ch == '"' -> {
+                    if (inQuotes && i + 1 < rawCsv.length && rawCsv[i + 1] == '"') {
+                        cur.append('"')
+                        i++
+                    } else {
+                        inQuotes = !inQuotes
+                    }
+                }
+                ch == ',' && !inQuotes -> {
+                    currentRow.add(cur.toString())
+                    cur.setLength(0)
+                }
+                (ch == '\n' || ch == '\r') && !inQuotes -> {
+                    if (ch == '\r' && i + 1 < rawCsv.length && rawCsv[i + 1] == '\n') i++
+                    currentRow.add(cur.toString())
+                    cur.setLength(0)
+                    records.add(currentRow.toList())
+                    currentRow.clear()
+                }
+                else -> cur.append(ch)
+            }
+            i++
+        }
+        if (cur.isNotEmpty() || currentRow.isNotEmpty()) {
+            currentRow.add(cur.toString())
+            records.add(currentRow.toList())
+        }
+        return records
     }
 
     fun parseAnkiTsvDeck(rawTsv: String): List<DeckCardEntry> {
@@ -1052,12 +1122,27 @@ class DeckImportExportUseCase @Inject constructor(
     private fun extractJsonString(jsonObj: String, key: String): String {
         val regex = Regex("\"$key\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
         val raw = regex.find(jsonObj)?.groupValues?.getOrNull(1) ?: return ""
-        return raw
-            .replace("\\n", "\n")
-            .replace("\\r", "\r")
-            .replace("\\t", "\t")
-            .replace("\\\"", "\"")
-            .replace("\\\\", "\\")
+        val sb = StringBuilder(raw.length)
+        var i = 0
+        while (i < raw.length) {
+            val ch = raw[i]
+            if (ch == '\\' && i + 1 < raw.length) {
+                when (val next = raw[i + 1]) {
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    '"' -> sb.append('"')
+                    '\\' -> sb.append('\\')
+                    '/' -> sb.append('/')
+                    else -> sb.append(next)
+                }
+                i += 2
+            } else {
+                sb.append(ch)
+                i++
+            }
+        }
+        return sb.toString()
     }
 
     private fun csvEscape(value: String): String {

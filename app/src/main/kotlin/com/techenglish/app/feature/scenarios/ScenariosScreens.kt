@@ -3,15 +3,18 @@ package com.techenglish.app.feature.scenarios
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -84,6 +87,7 @@ import com.techenglish.app.core.designsystem.StatusBadge
 import com.techenglish.app.core.designsystem.TechColors
 import com.techenglish.app.core.designsystem.TerminalSearchField
 import com.techenglish.app.core.designsystem.TtsVoiceStatusBanner
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.rememberTechHaptics
 import com.techenglish.domain.model.ChameleonThemeType
 import com.techenglish.domain.model.ExerciseType
@@ -113,6 +117,7 @@ fun PracticeHubScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
         if (state.isLoading) {
@@ -124,17 +129,23 @@ fun PracticeHubScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = PaddingValues(top = 16.dp, bottom = 112.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
-                Text("Практика и сценарии", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    text = "Практика и сценарии",
+                    style = MaterialTheme.typography.headlineMedium,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
             }
 
             // Quick launchers for Technical Docs & Listening Studio
             item {
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     ElevatedCard(
@@ -178,7 +189,10 @@ fun PracticeHubScreen(
 
             // Stage 2 Offline Trainers (ФТ-7.1, ФТ-7.2, ФТ-7.3, ФТ-7.5)
             item {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -266,28 +280,36 @@ fun PracticeHubScreen(
 
             // Switcher between Scenarios & 64 Workplace Phrases
             item {
-                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SingleChoiceSegmentedButtonRow(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                ) {
                     SegmentedButton(
                         selected = state.selectedTab == 0,
                         onClick = { viewModel.selectTab(0) },
                         shape = SegmentedButtonDefaults.itemShape(0, 2)
-                    ) { Text("Сценарии (${state.scenarios.size})") }
+                    ) { Text("Сценарии (${state.scenarios.size})", maxLines = 1, softWrap = false) }
                     SegmentedButton(
                         selected = state.selectedTab == 1,
                         onClick = { viewModel.selectTab(1) },
                         shape = SegmentedButtonDefaults.itemShape(1, 2)
-                    ) { Text("Фразы (${state.phrases.size})") }
+                    ) { Text("Фразы (${state.phrases.size})", maxLines = 1, softWrap = false) }
                 }
             }
 
-            // Filter chips across ALL 8 mandatory scenario categories
+            // Filter chips across ALL 8 mandatory scenario categories (Edge-to-edge)
             item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     items(ScenarioType.entries) { type ->
                         FilterChip(
                             selected = state.selectedScenarioType == type,
                             onClick = { viewModel.toggleType(type) },
-                            label = { Text(type.labelRu) }
+                            label = { Text(type.labelRu, maxLines = 1, softWrap = false) }
                         )
                     }
                 }
@@ -298,16 +320,19 @@ fun PracticeHubScreen(
                     item {
                         EmptyStateView(
                             title = "Сценарии не найдены",
-                            subtitle = "Сбросьте фильтр, чтобы увидеть все тренажёры."
+                            subtitle = "Сбросьте фильтр, чтобы увидеть все тренажёры.",
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         )
                     }
                 } else {
                     items(state.scenarios, key = { it.id }) { scenario ->
-                        ScenarioCard(
-                            scenario = scenario,
-                            isCompleted = scenario.id in state.completedScenarioIds,
-                            onClick = { onOpenScenario(scenario.id) }
-                        )
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            ScenarioCard(
+                                scenario = scenario,
+                                isCompleted = scenario.id in state.completedScenarioIds,
+                                onClick = { onOpenScenario(scenario.id) }
+                            )
+                        }
                     }
                 }
             } else {
@@ -315,7 +340,8 @@ fun PracticeHubScreen(
                     TerminalSearchField(
                         value = state.phraseQuery,
                         onValueChange = viewModel::onPhraseQueryChange,
-                        placeholderText = "Поиск рабочей фразы на EN или RU..."
+                        placeholderText = "Поиск рабочей фразы на EN или RU...",
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
 
@@ -323,16 +349,19 @@ fun PracticeHubScreen(
                     item {
                         EmptyStateView(
                             title = "Фразы не найдены",
-                            subtitle = "Попробуйте другой поисковый запрос."
+                            subtitle = "Попробуйте другой поисковый запрос.",
+                            modifier = Modifier.padding(horizontal = 16.dp)
                         )
                     }
                 } else {
                     items(state.phrases, key = { it.id }) { phrase ->
-                        WorkPhraseCard(
-                            phrase = phrase,
-                            onSpeak = { viewModel.speak(phrase.phraseEn) },
-                            onSave = { viewModel.savePhraseToVocabulary(phrase) }
-                        )
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            WorkPhraseCard(
+                                phrase = phrase,
+                                onSpeak = { viewModel.speak(phrase.phraseEn) },
+                                onSave = { viewModel.savePhraseToVocabulary(phrase) }
+                            )
+                        }
                     }
                 }
             }
@@ -460,6 +489,7 @@ fun ScenarioExerciseScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -486,8 +516,9 @@ fun ScenarioExerciseScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             val chameleonTheme = remember(scenario.type) {

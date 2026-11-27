@@ -1,5 +1,6 @@
 package com.techenglish.app.core.navigation
 
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Code
@@ -7,14 +8,12 @@ import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Style
-import androidx.compose.material3.Icon
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.navigation.NavDestination.Companion.hierarchy
@@ -25,6 +24,8 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.techenglish.app.core.designsystem.CapsuleDockItem
+import com.techenglish.app.core.designsystem.FloatingCapsuleNavDock
 import com.techenglish.app.feature.academic.AcademicDictionaryScreen
 import com.techenglish.app.feature.academic.AcademicSrsScreen
 import com.techenglish.app.feature.academic.AcademicTermDetailScreen
@@ -32,6 +33,8 @@ import com.techenglish.app.feature.documentation.DocReaderScreen
 import com.techenglish.app.feature.documentation.DocumentationListScreen
 import com.techenglish.app.feature.home.HomeScreen
 import com.techenglish.app.feature.listening.ListeningScreen
+import com.techenglish.app.feature.onboarding.OnboardingAuthScreen
+import com.techenglish.app.feature.onboarding.OnboardingProfileSetupScreen
 import com.techenglish.app.feature.profile.ProfileScreen
 import com.techenglish.app.feature.programming.CodeBreakdownScreen
 import com.techenglish.app.feature.programming.LanguageComparisonScreen
@@ -62,6 +65,9 @@ import com.techenglish.app.feature.vocabulary.FlashcardsScreen
 import com.techenglish.app.feature.vocabulary.VocabularyScreen
 
 object Routes {
+    const val ONBOARDING_AUTH = "onboarding_auth"
+    const val ONBOARDING_PROFILE_SETUP = "onboarding_profile_setup"
+
     const val HOME = "home"
     const val VOCABULARY = "vocabulary"
     const val LANGUAGES = "languages"
@@ -138,8 +144,12 @@ enum class BottomNavTab(
     PROFILE(Routes.PROFILE, "Профиль", Icons.Rounded.Person)
 }
 
+fun resolveStartDestination(isInitialSetupCompleted: Boolean): String =
+    if (isInitialSetupCompleted) Routes.HOME else Routes.ONBOARDING_AUTH
+
 @Composable
 fun TechEnglishNavShell(
+    startDestination: String = Routes.HOME,
     openFlashcardsOnLaunch: Boolean = false,
     pendingDestination: String? = null,
     onDestinationConsumed: () -> Unit = {}
@@ -150,10 +160,21 @@ fun TechEnglishNavShell(
     val topLevelRoutes = BottomNavTab.entries.map { it.route }.toSet()
     val showBottomBar = currentDestination?.route in topLevelRoutes
 
-    LaunchedEffect(openFlashcardsOnLaunch, pendingDestination) {
+    LaunchedEffect(openFlashcardsOnLaunch, pendingDestination, currentDestination?.route) {
+        val currentRoute = currentDestination?.route ?: return@LaunchedEffect
+        if (currentRoute == Routes.ONBOARDING_AUTH || currentRoute == Routes.ONBOARDING_PROFILE_SETUP) {
+            return@LaunchedEffect
+        }
         val target = pendingDestination ?: if (openFlashcardsOnLaunch) "flashcards" else null
-        if (target == "flashcards") {
-            navController.navigate(Routes.flashcards()) { launchSingleTop = true }
+        if (!target.isNullOrBlank()) {
+            when (target) {
+                "flashcards" -> navController.navigate(Routes.flashcards()) { launchSingleTop = true }
+                Routes.ACADEMIC_DICTIONARY -> navController.navigate(Routes.ACADEMIC_DICTIONARY) { launchSingleTop = true }
+                Routes.FRIENDS_HUB -> navController.navigate(Routes.FRIENDS_HUB) { launchSingleTop = true }
+                Routes.PVP_DUEL -> navController.navigate(Routes.PVP_DUEL) { launchSingleTop = true }
+                Routes.THEMATIC_ROOMS -> navController.navigate(Routes.THEMATIC_ROOMS) { launchSingleTop = true }
+                Routes.AI_MENTOR -> navController.navigate(Routes.AI_MENTOR) { launchSingleTop = true }
+            }
             onDestinationConsumed()
         }
     }
@@ -166,41 +187,80 @@ fun TechEnglishNavShell(
         }
     }
 
+    fun navigateSafe(route: String) {
+        navController.navigate(route) { launchSingleTop = true }
+    }
+
+    fun safePopBack() {
+        val current = navController.currentBackStackEntry
+        if (current?.lifecycle?.currentState == androidx.lifecycle.Lifecycle.State.RESUMED) {
+            navController.popBackStack()
+        }
+    }
+
+    val dockItems = remember {
+        BottomNavTab.entries.map { CapsuleDockItem(it.route, it.labelRu, it.icon) }
+    }
+    val activeDockRoute = BottomNavTab.entries
+        .firstOrNull { tab -> currentDestination?.hierarchy?.any { it.route == tab.route } == true }
+        ?.route
+
     Scaffold(
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             if (showBottomBar) {
-                NavigationBar {
-                    BottomNavTab.entries.forEach { tab ->
-                        val selected = currentDestination?.hierarchy?.any { it.route == tab.route } == true
-                        NavigationBarItem(
-                            selected = selected,
-                            onClick = { navigateTopLevel(tab.route) },
-                            icon = { Icon(tab.icon, contentDescription = tab.labelRu) },
-                            label = { Text(tab.labelRu, maxLines = 1) }
-                        )
-                    }
-                }
+                FloatingCapsuleNavDock(
+                    items = dockItems,
+                    selectedRoute = activeDockRoute,
+                    onSelect = { item -> navigateTopLevel(item.route) }
+                )
             }
         }
     ) { innerPadding ->
         NavHost(
             navController = navController,
-            startDestination = Routes.HOME,
-            modifier = Modifier.padding(innerPadding)
+            startDestination = startDestination,
+            modifier = Modifier
+                .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
         ) {
+            composable(Routes.ONBOARDING_AUTH) {
+                OnboardingAuthScreen(
+                    onNavigateToProfileSetup = { navigateSafe(Routes.ONBOARDING_PROFILE_SETUP) },
+                    onNavigateToHome = {
+                        navController.navigate(Routes.HOME) {
+                            popUpTo(Routes.ONBOARDING_AUTH) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
+
+            composable(Routes.ONBOARDING_PROFILE_SETUP) {
+                OnboardingProfileSetupScreen(
+                    onBack = { safePopBack() },
+                    onSetupCompleted = {
+                        navController.navigate(Routes.HOME) {
+                            popUpTo(navController.graph.id) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                )
+            }
+
             composable(Routes.HOME) {
                 HomeScreen(
-                    onStartLearning = { navController.navigate(Routes.flashcards()) },
+                    onStartLearning = { navigateSafe(Routes.flashcards()) },
                     onOpenVocabulary = { navigateTopLevel(Routes.VOCABULARY) },
-                    onOpenAcademicDictionary = { navController.navigate(Routes.ACADEMIC_DICTIONARY) },
+                    onOpenAcademicDictionary = { navigateSafe(Routes.ACADEMIC_DICTIONARY) },
                     onOpenLanguages = { navigateTopLevel(Routes.LANGUAGES) },
-                    onOpenCompare = { navController.navigate(Routes.languageCompare(1, 8)) },
-                    onOpenDocs = { navController.navigate(Routes.DOCS_LIST) },
+                    onOpenCompare = { navigateSafe(Routes.languageCompare(1, 8)) },
+                    onOpenDocs = { navigateSafe(Routes.DOCS_LIST) },
                     onOpenScenarios = { navigateTopLevel(Routes.PRACTICE) },
-                    onOpenListening = { navController.navigate(Routes.LISTENING) },
-                    onOpenStatistics = { navController.navigate(Routes.STATISTICS) },
-                    onOpenLeaderboards = { navController.navigate(Routes.LEADERBOARDS) },
-                    onOpenFriends = { navController.navigate(Routes.FRIENDS_HUB) }
+                    onOpenListening = { navigateSafe(Routes.LISTENING) },
+                    onOpenStatistics = { navigateSafe(Routes.STATISTICS) },
+                    onOpenLeaderboards = { navigateSafe(Routes.LEADERBOARDS) },
+                    onOpenFriends = { navigateSafe(Routes.FRIENDS_HUB) }
                 )
             }
 

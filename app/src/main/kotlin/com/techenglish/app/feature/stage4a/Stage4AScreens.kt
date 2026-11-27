@@ -8,9 +8,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -24,12 +26,15 @@ import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDownload
 import androidx.compose.material.icons.rounded.CloudUpload
+import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.Flag
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.KeyboardArrowDown
 import androidx.compose.material.icons.rounded.KeyboardArrowUp
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Star
+import androidx.compose.material.icons.rounded.ThumbDown
+import androidx.compose.material.icons.rounded.ThumbUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -64,11 +69,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.feature.stage3.OfflineModeBanner
 import com.techenglish.domain.model.CommentSortOrder
 import com.techenglish.domain.model.CommunityComment
@@ -121,6 +128,7 @@ fun CommentsMnemonicsContent(
     var moderationTarget by remember { mutableStateOf<CommunityComment?>(null) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -150,8 +158,9 @@ fun CommentsMnemonicsContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -172,6 +181,10 @@ fun CommentsMnemonicsContent(
                             value = draft,
                             onValueChange = { draft = it },
                             label = { Text("Подсказка по запоминанию (5–1000 символов)") },
+                            supportingText = {
+                                val len = draft.trim().length
+                                if (len in 0..4) Text("Минимум 5 символов ($len/5)")
+                            },
                             minLines = 2,
                             maxLines = 5,
                             modifier = Modifier.fillMaxWidth()
@@ -309,7 +322,10 @@ private fun CommentCard(
                     Text(
                         text = "@${comment.authorUsername} • ${comment.authorRankTitle}",
                         style = MonoTagTextStyle,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
                     IconButton(onClick = onReport, modifier = Modifier.size(30.dp)) {
                         Icon(
@@ -321,11 +337,24 @@ private fun CommentCard(
                     }
                 }
                 Text(text = comment.body, style = MaterialTheme.typography.bodyMedium)
-                Text(
-                    text = "$dateLabel • ↑${comment.upvotes} / ↓${comment.downvotes}",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = dateLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Icon(Icons.Rounded.ThumbUp, contentDescription = null, modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${comment.upvotes}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Icon(Icons.Rounded.ThumbDown, contentDescription = null, modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${comment.downvotes}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
     }
@@ -381,6 +410,7 @@ fun CommunityDecksContent(
     val popularTags = listOf("backend", "android", "kotlin", "interview", "devops", "system-design")
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Колоды сообщества (Decks)") },
@@ -401,8 +431,9 @@ fun CommunityDecksContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -460,12 +491,28 @@ fun CommunityDecksContent(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(deck.title, style = MaterialTheme.typography.titleMedium)
-                                Text(
-                                    text = "@${deck.authorUsername} • ${deck.termCount} слов • ↓${deck.downloadsCount}",
-                                    style = MonoTagTextStyle,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Text(deck.title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    Text(
+                                        text = "@${deck.authorUsername} • ${deck.termCount} слов",
+                                        style = MonoTagTextStyle,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f, fill = false)
+                                    )
+                                    Icon(Icons.Rounded.Download, contentDescription = null, modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        text = "${deck.downloadsCount}",
+                                        style = MonoTagTextStyle,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        softWrap = false
+                                    )
+                                }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
@@ -530,7 +577,7 @@ fun CommunityDecksContent(
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(Modifier.width(6.dp))
-                                Text(if (deck.isDownloadedLocally) "В Room ✓ (обновить)" else "Скачать в Room (1 тап)")
+                                Text(if (deck.isDownloadedLocally) "В Room (обновить)" else "Скачать в Room (1 тап)")
                             }
                             OutlinedButton(onClick = { ratingTarget = deck }) {
                                 Text("Оценить")
@@ -559,6 +606,9 @@ fun CommunityDecksContent(
                         value = title,
                         onValueChange = { title = it },
                         label = { Text("Название колоды") },
+                        supportingText = if (title.trim().length < 4) {
+                            { Text("Минимум 4 символа") }
+                        } else null,
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -606,7 +656,12 @@ fun CommunityDecksContent(
                         FilterChip(
                             selected = selectedStars == stars,
                             onClick = { selectedStars = stars },
-                            label = { Text("$stars★", style = MonoTagTextStyle) }
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text("$stars", style = MonoTagTextStyle)
+                                    Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(13.dp))
+                                }
+                            }
                         )
                     }
                 }

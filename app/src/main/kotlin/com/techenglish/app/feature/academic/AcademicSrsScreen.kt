@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -57,6 +58,7 @@ import com.techenglish.app.core.designsystem.ComboStreakBanner
 import com.techenglish.app.core.designsystem.DifficultyBadge
 import com.techenglish.app.core.designsystem.HighlightedExampleQuoteCard
 import com.techenglish.app.core.designsystem.IpaTextStyle
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.SkeletonListPlaceholder
 import com.techenglish.app.core.designsystem.StatusBadge
@@ -80,6 +82,7 @@ fun AcademicSrsScreen(
     val haptics = rememberTechHaptics()
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Advanced Academic SRS") },
@@ -96,35 +99,51 @@ fun AcademicSrsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding(horizontal = 0.dp)),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // 1. 6 Mandatory Academic SRS Modes Selector
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 1. 6 Mandatory Academic SRS Modes Selector (Edge-to-edge)
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(AcademicSrsMode.entries) { mode ->
                     FilterChip(
                         selected = state.mode == mode,
                         onClick = { viewModel.selectMode(mode) },
-                        label = { Text(mode.labelRu) }
+                        label = { Text(mode.labelRu, maxLines = 1, softWrap = false) }
                     )
                 }
             }
 
             // 2. Format Switcher: SM-2 Flashcards vs Definition Comprehension Quiz
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+            SingleChoiceSegmentedButtonRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
                 AcademicPracticeFormat.entries.forEachIndexed { idx, fmt ->
                     SegmentedButton(
                         selected = state.format == fmt,
                         onClick = { viewModel.selectFormat(fmt) },
                         shape = SegmentedButtonDefaults.itemShape(idx, AcademicPracticeFormat.entries.size)
                     ) {
-                        Text(fmt.labelRu)
+                        Text(fmt.labelRu, maxLines = 1, softWrap = false)
                     }
                 }
             }
 
             // 3. Combo Streak Banner (УИ-3.2)
-            ComboStreakBanner(comboState = state.comboState)
+            ComboStreakBanner(
+                comboState = state.comboState,
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
+
+            Column(
+                modifier = Modifier.padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
 
             when {
                 state.isLoading -> SkeletonListPlaceholder(itemCount = 2)
@@ -369,6 +388,7 @@ fun AcademicSrsScreen(
                         }
                     }
                 }
+            }
             }
         }
     }

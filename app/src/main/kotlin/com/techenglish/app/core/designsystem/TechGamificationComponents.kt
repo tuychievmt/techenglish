@@ -52,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.techenglish.domain.model.ChameleonThemeType
 import com.techenglish.domain.model.ComboStreakState
@@ -106,25 +107,31 @@ fun GitHubContributionGraph(
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "GitHub Contribution Graph (365 дн.)",
                         style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "Активных дней: $activeDaysCount • Действий за год: $totalActionsCount",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
                 Text(
                     text = "${days.size}d",
                     style = MonoTagTextStyle,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    softWrap = false
                 )
             }
 
@@ -253,9 +260,10 @@ fun ComboStreakBanner(
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
@@ -264,16 +272,20 @@ fun ComboStreakBanner(
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onSurface
                     )
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = msg,
                             style = TermTitleTextStyle,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "Серия верных ответов подряд: ${comboState.currentStreak}x",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -285,6 +297,8 @@ fun ComboStreakBanner(
                         text = "COMBO x${comboState.currentStreak}",
                         style = MonoTagTextStyle,
                         color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -372,7 +386,7 @@ fun ChameleonScenarioContainer(
                             modifier = Modifier.size(18.dp)
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = when (themeType) {
                                 ChameleonThemeType.GITHUB_PR -> "GitHub PR • feature/review → main"
@@ -381,13 +395,17 @@ fun ChameleonScenarioContainer(
                                 ChameleonThemeType.DEFAULT_IDE -> headerTitle
                             },
                             style = MonoTagTextStyle,
-                            color = headerFg
+                            color = headerFg,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = headerSubtitle,
                             style = MaterialTheme.typography.labelSmall,
                             color = if (themeType == ChameleonThemeType.TERMINAL) Color(0xFFB1BAC4)
-                            else MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
@@ -399,6 +417,8 @@ fun ChameleonScenarioContainer(
                         text = themeType.badgeCode,
                         style = MonoTagTextStyle,
                         color = headerFg,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }

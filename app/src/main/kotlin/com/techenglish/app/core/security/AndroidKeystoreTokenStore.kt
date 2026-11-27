@@ -6,8 +6,10 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.techenglish.domain.model.AuthProvider
@@ -17,9 +19,12 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import java.io.IOException
 import java.security.KeyStore
+import java.security.MessageDigest
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -27,7 +32,10 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.tokenDataStore: DataStore<Preferences> by preferencesDataStore(name = "techenglish_secure_tokens")
+private val Context.tokenDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "techenglish_secure_tokens",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 internal interface TokenCipherKeyProvider {
     fun getOrCreateKey(): SecretKey
@@ -42,30 +50,28 @@ private class HardwareAndroidKeystoreKeyProvider : TokenCipherKeyProvider {
         return Build.FINGERPRINT.equals("robolectric", ignoreCase = true)
     }
 
-    override fun getOrCreateKey(): SecretKey {
+    override fun getOrCreateKey(): SecretKey = synchronized(this) {
         if (isRobolectricJvm()) {
-            return robolectricAesKey ?: synchronized(this) {
-                robolectricAesKey ?: KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
-                    .also { robolectricAesKey = it }
-            }
+            return robolectricAesKey ?: KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+                .also { robolectricAesKey = it }
         }
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
         return (keyStore.getKey(KEY_ALIAS, null) as? SecretKey) ?: generateAndroidKeystoreKey()
     }
 
     override fun resetKey() {
-        if (isRobolectricJvm()) {
-            synchronized(this) {
+        synchronized(this) {
+            if (isRobolectricJvm()) {
                 robolectricAesKey = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+                return
             }
-            return
-        }
-        runCatching {
-            val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
-            if (keyStore.containsAlias(KEY_ALIAS)) {
-                keyStore.deleteEntry(KEY_ALIAS)
+            runCatching {
+                val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+                if (keyStore.containsAlias(KEY_ALIAS)) {
+                    keyStore.deleteEntry(KEY_ALIAS)
+                }
+                generateAndroidKeystoreKey()
             }
-            generateAndroidKeystoreKey()
         }
     }
 
@@ -120,27 +126,36 @@ class AndroidKeystoreTokenStore internal constructor(
     private val _reauthRequired = MutableStateFlow(false)
     val reauthRequired: StateFlow<Boolean> = _reauthRequired.asStateFlow()
 
-    val sessionFlow: Flow<AuthSession> = context.tokenDataStore.data.map { prefs ->
-        val uid = prefs[Keys.USER_ID]
-        if (uid.isNullOrBlank()) {
-            AuthSession()
-        } else {
-            AuthSession(
-                userId = uid,
-                username = prefs[Keys.USERNAME] ?: "dev_user",
-                email = prefs[Keys.EMAIL].orEmpty(),
-                provider = AuthProvider.fromRaw(prefs[Keys.PROVIDER] ?: "EMAIL"),
-                isGuest = false
-            )
+    val sessionFlow: Flow<AuthSession> = context.tokenDataStore.data
+        .catch { err ->
+            if (err is IOException) emit(emptyPreferences()) else throw err
         }
-    }
+        .map { prefs ->
+            val uid = prefs[Keys.USER_ID]
+            if (uid.isNullOrBlank()) {
+                AuthSession()
+            } else {
+                AuthSession(
+                    userId = uid,
+                    username = prefs[Keys.USERNAME] ?: "dev_user",
+                    email = prefs[Keys.EMAIL].orEmpty(),
+                    provider = AuthProvider.fromRaw(prefs[Keys.PROVIDER] ?: "EMAIL"),
+                    isGuest = false
+                )
+            }
+        }
 
-    val apiBaseUrlFlow: Flow<String> = context.tokenDataStore.data.map { prefs ->
-        prefs[Keys.API_BASE_URL] ?: DEFAULT_API_BASE_URL
-    }
+    val apiBaseUrlFlow: Flow<String> = context.tokenDataStore.data
+        .catch { err ->
+            if (err is IOException) emit(emptyPreferences()) else throw err
+        }
+        .map { prefs ->
+            prefs[Keys.API_BASE_URL] ?: DEFAULT_API_BASE_URL
+        }
 
     suspend fun getAccessToken(): String? {
-        val enc = context.tokenDataStore.data.first()[Keys.ACCESS_TOKEN_ENC] ?: return null
+        val prefs = runCatching { context.tokenDataStore.data.first() }.getOrNull() ?: return null
+        val enc = prefs[Keys.ACCESS_TOKEN_ENC] ?: return null
         val decrypted = decrypt(enc)
         if (decrypted == null) {
             handleKeystoreRecovery()
@@ -149,7 +164,8 @@ class AndroidKeystoreTokenStore internal constructor(
     }
 
     suspend fun getRefreshToken(): String? {
-        val enc = context.tokenDataStore.data.first()[Keys.REFRESH_TOKEN_ENC] ?: return null
+        val prefs = runCatching { context.tokenDataStore.data.first() }.getOrNull() ?: return null
+        val enc = prefs[Keys.REFRESH_TOKEN_ENC] ?: return null
         val decrypted = decrypt(enc)
         if (decrypted == null) {
             handleKeystoreRecovery()
@@ -182,9 +198,7 @@ class AndroidKeystoreTokenStore internal constructor(
         email: String,
         provider: AuthProvider
     ) {
-        val encAccess = encryptOrRecover(accessToken)
-        val encRefresh = encryptOrRecover(refreshToken)
-        if (encAccess == null || encRefresh == null) {
+        val (encAccess, encRefresh) = encryptPairOrRecover(accessToken, refreshToken) ?: run {
             handleKeystoreRecovery()
             return
         }
@@ -199,17 +213,27 @@ class AndroidKeystoreTokenStore internal constructor(
         }
     }
 
-    suspend fun updateTokens(accessToken: String, refreshToken: String) {
-        val encAccess = encryptOrRecover(accessToken)
-        val encRefresh = encryptOrRecover(refreshToken)
-        if (encAccess == null || encRefresh == null) {
+    suspend fun updateTokens(accessToken: String, refreshToken: String): Boolean {
+        val (encAccess, encRefresh) = encryptPairOrRecover(accessToken, refreshToken) ?: run {
             handleKeystoreRecovery()
-            return
+            return false
         }
         _reauthRequired.value = false
         context.tokenDataStore.edit { prefs ->
             prefs[Keys.ACCESS_TOKEN_ENC] = encAccess
             prefs[Keys.REFRESH_TOKEN_ENC] = encRefresh
+        }
+        return true
+    }
+
+    suspend fun updateSessionProfile(username: String? = null, email: String? = null) {
+        context.tokenDataStore.edit { prefs ->
+            if (!username.isNullOrBlank()) {
+                prefs[Keys.USERNAME] = username.trim()
+            }
+            if (!email.isNullOrBlank()) {
+                prefs[Keys.EMAIL] = email.trim()
+            }
         }
     }
 
@@ -234,6 +258,41 @@ class AndroidKeystoreTokenStore internal constructor(
         return result
     }
 
+    /**
+     * Atomically verifies [returnedState] against the stored pending OAuth state and consumes it ONLY on match,
+     * protecting an in-flight Custom Tabs OAuth flow from being cancelled by forged/foreign deep links.
+     */
+    suspend fun consumePendingOAuthStateIfMatches(returnedState: String): OAuthStateMatchResult {
+        if (returnedState.isBlank()) return OAuthStateMatchResult.MISMATCH
+        var matchResult: OAuthStateMatchResult = OAuthStateMatchResult.MISSING
+        context.tokenDataStore.edit { prefs ->
+            val expectedState = prefs[Keys.OAUTH_PENDING_STATE]
+            if (expectedState.isNullOrBlank()) {
+                matchResult = OAuthStateMatchResult.MISSING
+                return@edit
+            }
+            val matches = MessageDigest.isEqual(
+                expectedState.toByteArray(Charsets.UTF_8),
+                returnedState.toByteArray(Charsets.UTF_8)
+            )
+            if (matches) {
+                val providerRaw = prefs[Keys.OAUTH_PENDING_PROVIDER]
+                prefs.remove(Keys.OAUTH_PENDING_STATE)
+                prefs.remove(Keys.OAUTH_PENDING_PROVIDER)
+                matchResult = OAuthStateMatchResult.Matched(AuthProvider.fromRaw(providerRaw ?: "GITHUB"))
+            } else {
+                matchResult = OAuthStateMatchResult.MISMATCH
+            }
+        }
+        return matchResult
+    }
+
+    sealed interface OAuthStateMatchResult {
+        data class Matched(val provider: AuthProvider) : OAuthStateMatchResult
+        data object MISSING : OAuthStateMatchResult
+        data object MISMATCH : OAuthStateMatchResult
+    }
+
     suspend fun clearSession() {
         context.tokenDataStore.edit { prefs ->
             prefs.remove(Keys.ACCESS_TOKEN_ENC)
@@ -253,10 +312,10 @@ class AndroidKeystoreTokenStore internal constructor(
         _reauthRequired.value = true
     }
 
-    private fun encryptOrRecover(plaintext: String): String? {
-        runCatching { encrypt(plaintext) }.onSuccess { return it }
+    private fun encryptPairOrRecover(first: String, second: String): Pair<String, String>? {
+        runCatching { encrypt(first) to encrypt(second) }.onSuccess { return it }
         runCatching { keyProvider.resetKey() }
-        return runCatching { encrypt(plaintext) }.getOrNull()
+        return runCatching { encrypt(first) to encrypt(second) }.getOrNull()
     }
 
     internal fun encrypt(plaintext: String): String {

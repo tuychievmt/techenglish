@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -45,6 +46,7 @@ import com.techenglish.app.core.designsystem.EmptyStateView
 import com.techenglish.app.core.designsystem.SkeletonListPlaceholder
 import com.techenglish.app.core.designsystem.StatusBadge
 import com.techenglish.app.core.designsystem.ensureAccessibleAccent
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.parseHexColor
 
 // ==================== 2. LANGUAGE DETAIL SCREEN ====================
@@ -61,6 +63,7 @@ fun LanguageDetailScreen(
     val lang = state.language
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text(lang?.name ?: "Язык") },
@@ -97,7 +100,7 @@ fun LanguageDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             // EN / RU switcher

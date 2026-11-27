@@ -8,13 +8,21 @@ import androidx.browser.customtabs.CustomTabsIntent
 import com.techenglish.app.core.network.AuthResponseDto
 import com.techenglish.app.core.network.TechEnglishApiClient
 import com.techenglish.domain.model.AuthProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import java.security.MessageDigest
+import kotlinx.coroutines.flow.asStateFlow
 import java.security.SecureRandom
 import javax.inject.Inject
 import javax.inject.Singleton
+
+sealed interface OAuthCallbackEvent {
+    data class Success(val auth: AuthResponseDto) : OAuthCallbackEvent
+    data class Error(val messageRu: String) : OAuthCallbackEvent
+}
 
 /**
  * SP1-03b / BUG-04 — Client-side OAuth 2.0 Custom Tabs + DataStore state + one-time ticket exchange.
@@ -29,7 +37,8 @@ import javax.inject.Singleton
 @Singleton
 class OAuthCallbackHandler internal constructor(
     private val tokenStore: AndroidKeystoreTokenStore,
-    private val ticketExchanger: suspend (String) -> AuthResponseDto
+    private val ticketExchanger: suspend (String) -> AuthResponseDto,
+    private val onTokensSaved: () -> Unit = {}
 ) {
     @Inject
     constructor(
@@ -37,11 +46,18 @@ class OAuthCallbackHandler internal constructor(
         apiClient: TechEnglishApiClient
     ) : this(
         tokenStore = tokenStore,
-        ticketExchanger = { ticket -> apiClient.exchangeOAuthTicket(ticket) }
+        ticketExchanger = { ticket -> apiClient.exchangeOAuthTicket(ticket) },
+        onTokensSaved = { apiClient.clearAuthCache() }
     )
 
     private val _events = MutableSharedFlow<String>(extraBufferCapacity = 4)
     val events: SharedFlow<String> = _events.asSharedFlow()
+
+    private val _callbackResults = MutableSharedFlow<OAuthCallbackEvent>(extraBufferCapacity = 4)
+    val callbackResults: SharedFlow<OAuthCallbackEvent> = _callbackResults.asSharedFlow()
+
+    private val _isProcessingCallback = MutableStateFlow(false)
+    val isProcessingCallback: StateFlow<Boolean> = _isProcessingCallback.asStateFlow()
 
     suspend fun prepareAuthorizeUrl(provider: AuthProvider): Uri {
         val stateBytes = ByteArray(24)
@@ -86,34 +102,41 @@ class OAuthCallbackHandler internal constructor(
         if (!isOAuthCallbackUri(uri)) {
             return Result.failure(IllegalArgumentException("Unsupported OAuth callback URI"))
         }
-        val pending = tokenStore.consumePendingOAuthState()
-            ?: return Result.failure(IllegalStateException("Missing or already consumed OAuth state"))
-        val (expectedState, _) = pending
-
-        val returnedState = uri.getQueryParameter("state")
-        if (returnedState.isNullOrBlank() ||
-            !MessageDigest.isEqual(
-                expectedState.toByteArray(Charsets.UTF_8),
-                returnedState.toByteArray(Charsets.UTF_8)
-            )
-        ) {
-            _events.tryEmit("Ошибка OAuth: неверный параметр state.")
-            return Result.failure(SecurityException("OAuth state mismatch"))
+        val returnedState = uri.getQueryParameter("state").orEmpty()
+        when (tokenStore.consumePendingOAuthStateIfMatches(returnedState)) {
+            AndroidKeystoreTokenStore.OAuthStateMatchResult.MISSING -> {
+                val msg = "OAuth-сессия истекла или уже использована. Повторите вход."
+                _events.tryEmit(msg)
+                _callbackResults.tryEmit(OAuthCallbackEvent.Error(msg))
+                return Result.failure(IllegalStateException("Missing or already consumed OAuth state"))
+            }
+            AndroidKeystoreTokenStore.OAuthStateMatchResult.MISMATCH -> {
+                val msg = "Ошибка OAuth: неверный параметр state."
+                _events.tryEmit(msg)
+                _callbackResults.tryEmit(OAuthCallbackEvent.Error(msg))
+                return Result.failure(SecurityException("OAuth state mismatch"))
+            }
+            is AndroidKeystoreTokenStore.OAuthStateMatchResult.Matched -> Unit
         }
 
         val oauthError = uri.getQueryParameter("error")
         if (!oauthError.isNullOrBlank()) {
-            _events.tryEmit("Вход через OAuth отменён или отклонён ($oauthError).")
+            val msg = "Вход через OAuth отменён или отклонён ($oauthError)."
+            _events.tryEmit(msg)
+            _callbackResults.tryEmit(OAuthCallbackEvent.Error(msg))
             return Result.failure(IllegalStateException("OAuth error: $oauthError"))
         }
 
         val ticket = uri.getQueryParameter("ticket")
         if (ticket.isNullOrBlank()) {
-            _events.tryEmit("Ошибка OAuth: сервер не вернул одноразовый тикет.")
+            val msg = "Ошибка OAuth: сервер не вернул одноразовый тикет."
+            _events.tryEmit(msg)
+            _callbackResults.tryEmit(OAuthCallbackEvent.Error(msg))
             return Result.failure(IllegalArgumentException("Missing OAuth ticket"))
         }
 
-        return runCatching {
+        _isProcessingCallback.value = true
+        return try {
             val auth = ticketExchanger(ticket)
             tokenStore.saveTokensAndSession(
                 accessToken = auth.accessToken,
@@ -123,10 +146,19 @@ class OAuthCallbackHandler internal constructor(
                 email = "",
                 provider = AuthProvider.fromRaw(auth.provider)
             )
+            onTokensSaved()
             _events.tryEmit("Вход через ${auth.provider} выполнен (@${auth.username}).")
-            auth
-        }.onFailure { err ->
-            _events.tryEmit("Ошибка OAuth-обмена: ${err.localizedMessage ?: "повторите попытку"}")
+            _callbackResults.tryEmit(OAuthCallbackEvent.Success(auth))
+            Result.success(auth)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (err: Exception) {
+            val msg = "Ошибка OAuth-обмена: ${err.localizedMessage ?: "повторите попытку"}"
+            _events.tryEmit(msg)
+            _callbackResults.tryEmit(OAuthCallbackEvent.Error(msg))
+            Result.failure(err)
+        } finally {
+            _isProcessingCallback.value = false
         }
     }
 

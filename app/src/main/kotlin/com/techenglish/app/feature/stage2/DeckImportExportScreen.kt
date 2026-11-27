@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -49,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.JetBrainsMonoFontFamily
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.rememberTechHaptics
 import com.techenglish.domain.model.DeckFormat
 
@@ -88,6 +91,7 @@ fun DeckImportExportScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Импорт и экспорт колод") },
@@ -103,8 +107,9 @@ fun DeckImportExportScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (state.isBusy) {
@@ -145,7 +150,7 @@ fun DeckImportExportScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Button(
-                            onClick = { exportJsonLauncher.launch("techenglish_deck.json") },
+                            onClick = { runCatching { exportJsonLauncher.launch("techenglish_deck.json") } },
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Rounded.Download, contentDescription = null)
@@ -153,7 +158,7 @@ fun DeckImportExportScreen(
                             Text("JSON")
                         }
                         FilledTonalButton(
-                            onClick = { exportCsvLauncher.launch("techenglish_deck.csv") },
+                            onClick = { runCatching { exportCsvLauncher.launch("techenglish_deck.csv") } },
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Rounded.Download, contentDescription = null)
@@ -203,7 +208,7 @@ fun DeckImportExportScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Button(
-                        onClick = { importFileLauncher.launch(arrayOf("*/*")) },
+                        onClick = { runCatching { importFileLauncher.launch(arrayOf("*/*")) } },
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Icon(Icons.Rounded.Upload, contentDescription = null)

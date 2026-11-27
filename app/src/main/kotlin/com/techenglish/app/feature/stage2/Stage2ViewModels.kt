@@ -110,21 +110,30 @@ class ReadYourOwnDocsViewModel @Inject constructor(
         }
         viewModelScope.launch {
             _uiState.update { it.copy(isScanning = true, statusMessage = null) }
-            val saved = withContext(Dispatchers.Default) {
-                scanUseCase.importAndSaveDocument(
-                    title = state.draftTitle.ifBlank { "Мой README / заметки" },
-                    sourceFileName = "pasted_text.md",
-                    content = state.draftText
-                )
-            }
-            _uiState.update {
-                it.copy(
-                    isScanning = false,
-                    activeDoc = saved,
-                    draftTitle = "",
-                    draftText = "",
-                    statusMessage = "Найдено IT-терминов: ${saved.detectedTermsCount}"
-                )
+            try {
+                val saved = withContext(Dispatchers.Default) {
+                    scanUseCase.importAndSaveDocument(
+                        title = state.draftTitle.ifBlank { "Мой README / заметки" },
+                        sourceFileName = "pasted_text.md",
+                        content = state.draftText
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        activeDoc = saved,
+                        draftTitle = "",
+                        draftText = "",
+                        statusMessage = "Найдено IT-терминов: ${saved.detectedTermsCount}"
+                    )
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
+                _uiState.update {
+                    it.copy(statusMessage = "Не удалось просканировать текст: ${err.localizedMessage ?: "ошибка"}")
+                }
+            } finally {
+                _uiState.update { it.copy(isScanning = false) }
             }
         }
     }
@@ -206,12 +215,20 @@ class ReadYourOwnDocsViewModel @Inject constructor(
                     translation = selected.translationRu,
                     transcription = selected.transcription,
                     explanationRu = selected.explanationRu
-                )
-                _uiState.update {
-                    it.copy(
-                        selectedTerm = null,
-                        statusMessage = "«${selected.headword}» сохранён в «Мои слова»!"
-                    )
+                ).onSuccess {
+                    _uiState.update {
+                        it.copy(
+                            selectedTerm = null,
+                            statusMessage = "«${selected.headword}» сохранён в «Мои слова»!"
+                        )
+                    }
+                }.onFailure { err ->
+                    _uiState.update {
+                        it.copy(
+                            selectedTerm = null,
+                            statusMessage = err.localizedMessage ?: "Не удалось сохранить слово «${selected.headword}»"
+                        )
+                    }
                 }
             }
         }
@@ -269,21 +286,31 @@ class DebugTheLogViewModel @Inject constructor(
         _uiState.update { it.copy(selectedReportTokens = emptyList()) }
     }
 
+    @Volatile
+    private var isSubmittingDiagnosis = false
+
     fun submitDiagnosis() {
+        if (isSubmittingDiagnosis) return
         val state = _uiState.value
+        if (state.evaluation != null) return
         val challenge = state.currentChallenge ?: return
         val rootCause = state.selectedRootCause ?: return
+        isSubmittingDiagnosis = true
         viewModelScope.launch {
-            val result = trainerUseCase.submitDiagnosis(
-                challenge = challenge,
-                selectedRootCause = rootCause,
-                assembledReportTokens = state.selectedReportTokens
-            )
-            _uiState.update {
-                it.copy(
-                    evaluation = result,
-                    comboStreak = ComboStreakTracker.nextState(it.comboStreak, result.isFullySolved)
+            try {
+                val result = trainerUseCase.submitDiagnosis(
+                    challenge = challenge,
+                    selectedRootCause = rootCause,
+                    assembledReportTokens = state.selectedReportTokens
                 )
+                _uiState.update {
+                    it.copy(
+                        evaluation = result,
+                        comboStreak = ComboStreakTracker.nextState(it.comboStreak, result.isFullySolved)
+                    )
+                }
+            } finally {
+                isSubmittingDiagnosis = false
             }
         }
     }
@@ -451,13 +478,26 @@ class TimeAttackViewModel @Inject constructor(
         }
     }
 
+    private var runJob: Job? = null
+
     fun startRun() {
+        runJob?.cancel()
         timerJob?.cancel()
         val mode = _uiState.value.selectedMode
-        viewModelScope.launch {
+        runJob = viewModelScope.launch {
             val lang = settingsRepository.observeSettings().first().translationLanguage
             val qs = withContext(Dispatchers.Default) {
                 timeAttackUseCase.generateQuestions(mode, lang, count = 30)
+            }
+            if (qs.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        isRunning = false,
+                        isFinished = false,
+                        questions = emptyList()
+                    )
+                }
+                return@launch
             }
             _uiState.update {
                 it.copy(
@@ -511,9 +551,16 @@ class TimeAttackViewModel @Inject constructor(
 
     fun finishRun() {
         timerJob?.cancel()
-        val state = _uiState.value
-        if (!state.isRunning && state.isFinished) return
-        _uiState.update { it.copy(isRunning = false, isFinished = true) }
+        var snapshot: TimeAttackUiState? = null
+        _uiState.update { cur ->
+            if (!cur.isRunning && cur.isFinished) {
+                cur
+            } else {
+                snapshot = cur
+                cur.copy(isRunning = false, isFinished = true)
+            }
+        }
+        val state = snapshot ?: return
 
         viewModelScope.launch {
             val saved = timeAttackUseCase.recordSessionResult(
@@ -568,20 +615,29 @@ class DeckImportExportViewModel @Inject constructor(
     fun generateExport(format: DeckFormat) {
         viewModelScope.launch {
             _uiState.update { it.copy(isBusy = true, statusMessage = null) }
-            val content = withContext(Dispatchers.IO) {
-                when (format) {
-                    DeckFormat.JSON -> deckUseCase.exportCustomAndLearnedWordsToJson()
-                    DeckFormat.CSV -> deckUseCase.exportCustomAndLearnedWordsToCsv()
-                    else -> deckUseCase.exportCustomAndLearnedWordsToJson()
+            try {
+                val content = withContext(Dispatchers.IO) {
+                    when (format) {
+                        DeckFormat.JSON -> deckUseCase.exportCustomAndLearnedWordsToJson()
+                        DeckFormat.CSV -> deckUseCase.exportCustomAndLearnedWordsToCsv()
+                        else -> deckUseCase.exportCustomAndLearnedWordsToJson()
+                    }
                 }
-            }
-            _uiState.update {
-                it.copy(
-                    isBusy = false,
-                    exportedPreview = content,
-                    exportedFormat = format,
-                    statusMessage = "Экспорт ${format.labelRu} сформирован (${content.length} симв.)."
-                )
+                _uiState.update {
+                    it.copy(
+                        exportedPreview = content,
+                        exportedFormat = format,
+                        statusMessage = "Экспорт ${format.labelRu} сформирован (${content.length} симв.)."
+                    )
+                }
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
+                _uiState.update {
+                    it.copy(statusMessage = "Ошибка экспорта: ${err.localizedMessage ?: "повторите"}")
+                }
+            } finally {
+                _uiState.update { it.copy(isBusy = false) }
             }
         }
     }

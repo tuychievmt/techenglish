@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -92,3 +93,41 @@ def get_ota_pack(pack_id: str):
     raw_json = json.dumps(payload, ensure_ascii=False, sort_keys=True)
     sha = hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
     return {"pack_id": pack_id, "sha256_hex": sha, "payload_json": raw_json}
+
+
+def _parse_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+@router.get("/v1/app/version")
+def get_app_version():
+    latest_code = _parse_int_env("LATEST_VERSION_CODE", 310)
+    min_supported_code = _parse_int_env("MIN_SUPPORTED_VERSION_CODE", 310)
+    force_update = os.getenv("FORCE_UPDATE", "false").strip().lower() in {"1", "true", "yes", "on"}
+    latest_name = os.getenv("LATEST_VERSION_NAME", "3.1.0").strip() or "3.1.0"
+    apk_url = (
+        os.getenv(
+            "LATEST_APK_URL",
+            "https://github.com/tuychievmt/techenglish/releases/latest/download/app-standalone-release.apk",
+        ).strip()
+    )
+    apk_sha256 = os.getenv("LATEST_APK_SHA256", "").strip().lower()
+    changelog_ru = os.getenv(
+        "LATEST_CHANGELOG_RU",
+        "• Обновлён интерфейс Obsidian Aurora и Ceramic Glass\n• Повышена стабильность и безопасность синхронизации",
+    ).replace("\\n", "\n").strip()
+    return {
+        "latest_version_code": latest_code,
+        "latest_version_name": latest_name,
+        "min_supported_version_code": min_supported_code,
+        "force_update": force_update,
+        "apk_url": apk_url,
+        "apk_sha256": apk_sha256,
+        "changelog_ru": changelog_ru,
+    }

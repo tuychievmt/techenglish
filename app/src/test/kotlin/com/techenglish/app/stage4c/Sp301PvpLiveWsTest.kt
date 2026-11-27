@@ -63,4 +63,48 @@ class Sp301PvpLiveWsTest {
         assertEquals(0, outcome.ratingDelta)
         assertTrue(vm.uiState.value.matchState == PvpMatchState.IDLE)
     }
+
+    @Test
+    fun `Training fallback round increments player and bot scores on each question and finishes cleanly`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val tokenStore = AndroidKeystoreTokenStore(context)
+        val apiClient = TechEnglishApiClient(context, tokenStore)
+        val vm = PvpDuelViewModel(
+            apiClient = apiClient,
+            tokenStore = tokenStore,
+            evaluatePvpDuel = EvaluatePvpDuelUseCase()
+        )
+
+        vm.startLocalTrainingRoundNow(matchId = "training_test_score")
+        assertEquals(PvpMatchState.IN_PROGRESS, vm.uiState.value.matchState)
+        assertEquals(0, vm.uiState.value.playerScore)
+        assertEquals(0, vm.uiState.value.opponentScore)
+
+        val q0 = vm.uiState.value.questions[0]
+        vm.submitAnswer(q0.correctOptionIndex)
+        assertEquals(1, vm.uiState.value.playerScore)
+        assertEquals(1, vm.uiState.value.currentQuestionIndex)
+
+        val q1 = vm.uiState.value.questions[1]
+        vm.submitAnswer(q1.correctOptionIndex)
+        assertEquals(2, vm.uiState.value.playerScore)
+        assertEquals(2, vm.uiState.value.currentQuestionIndex)
+
+        // Answer remaining questions (3rd wrong, rest right) and verify final score & bot simulation
+        val q2 = vm.uiState.value.questions[2]
+        val wrongIdx = (q2.correctOptionIndex + 1) % q2.options.size
+        vm.submitAnswer(wrongIdx)
+        assertEquals(2, vm.uiState.value.playerScore)
+
+        while (vm.uiState.value.matchState == PvpMatchState.IN_PROGRESS) {
+            val curIdx = vm.uiState.value.currentQuestionIndex
+            val curQ = vm.uiState.value.questions[curIdx]
+            vm.submitAnswer(curQ.correctOptionIndex)
+        }
+
+        assertEquals(PvpMatchState.COMPLETED, vm.uiState.value.matchState)
+        assertEquals(7, vm.uiState.value.playerScore)
+        assertTrue("Simulated bot should score > 0 across 8 questions", vm.uiState.value.opponentScore in 1..8)
+        assertEquals(vm.uiState.value.opponentScore, vm.uiState.value.outcome?.opponentScore)
+    }
 }

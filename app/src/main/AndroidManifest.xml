@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <!-- Required on Android 11+ (API 30+) to bind Android TextToSpeech & SpeechRecognizer offline engines -->
     <queries>
@@ -33,8 +34,9 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:screenOrientation="unspecified"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.TechEnglish.Starting">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -63,6 +65,17 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/tech_english_widget_info" />
         </receiver>
+
+        <!-- FileProvider for verified in-app APK self-updates -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_provider_paths" />
+        </provider>
 
         <!-- Disable default WorkManager initializer so HiltWorkerFactory is used -->
         <provider

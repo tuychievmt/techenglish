@@ -5,9 +5,11 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.techenglish.app.core.audio.TechAudioController
 import com.techenglish.app.core.audio.TtsVoiceStatus
+import com.techenglish.app.core.designsystem.DEFAULT_ACADEMIC_TERMS_COUNT
 import com.techenglish.domain.model.Category
 import com.techenglish.domain.model.ProgrammingLanguage
 import com.techenglish.domain.model.Word
+import com.techenglish.domain.repository.AcademicVocabularyRepository
 import com.techenglish.domain.repository.ProgrammingLanguageRepository
 import com.techenglish.domain.repository.VocabularyRepository
 import com.techenglish.domain.usecase.AddCustomWordUseCase
@@ -48,13 +50,15 @@ data class VocabularyUiState(
     val categories: ImmutableList<Category> = persistentListOf(),
     val languages: ImmutableList<ProgrammingLanguage> = persistentListOf(),
     val words: ImmutableList<Word> = persistentListOf(),
-    val dueCount: Int = 0
+    val dueCount: Int = 0,
+    val academicTermCount: Int = DEFAULT_ACADEMIC_TERMS_COUNT
 )
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class VocabularyViewModel @Inject constructor(
     private val vocabularyRepository: VocabularyRepository,
+    academicVocabularyRepository: AcademicVocabularyRepository,
     languageRepository: ProgrammingLanguageRepository,
     private val searchWords: SearchWordsUseCase,
     private val addCustomWord: AddCustomWordUseCase,
@@ -75,13 +79,20 @@ class VocabularyViewModel @Inject constructor(
 
     private val filteredWordsFlow = queryFlow.flatMapLatest { searchWords(it) }
 
+    private val vocabMetaFlow = combine(
+        vocabularyRepository.observeCategories(),
+        languageRepository.observeAllLanguages(),
+        vocabularyRepository.observeDueCount(System.currentTimeMillis()),
+        academicVocabularyRepository.observeVerifiedCount()
+    ) { categories, languages, dueCount, verifiedCount ->
+        VocabMeta(categories, languages, dueCount, verifiedCount)
+    }
+
     val uiState: StateFlow<VocabularyUiState> = combine(
         combine(queryFlow, categoryIdFlow, quickFilterFlow) { q, c, f -> Triple(q, c, f) },
         filteredWordsFlow,
-        vocabularyRepository.observeCategories(),
-        languageRepository.observeAllLanguages(),
-        vocabularyRepository.observeDueCount(System.currentTimeMillis())
-    ) { (query, selectedCatId, quickFilter), words, categories, languages, dueCount ->
+        vocabMetaFlow
+    ) { (query, selectedCatId, quickFilter), words, meta ->
         val now = System.currentTimeMillis()
         val filtered = words.filter { word ->
             val matchesCategory = selectedCatId == null || word.categoryId == selectedCatId
@@ -98,15 +109,23 @@ class VocabularyViewModel @Inject constructor(
             query = query,
             selectedCategoryId = selectedCatId,
             quickFilter = quickFilter,
-            categories = categories.toImmutableList(),
-            languages = languages.toImmutableList(),
+            categories = meta.categories.toImmutableList(),
+            languages = meta.languages.toImmutableList(),
             words = filtered.toImmutableList(),
-            dueCount = dueCount
+            dueCount = meta.dueCount,
+            academicTermCount = if (meta.verifiedCount > 0) meta.verifiedCount else DEFAULT_ACADEMIC_TERMS_COUNT
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000L),
         initialValue = VocabularyUiState(isLoading = true)
+    )
+
+    private data class VocabMeta(
+        val categories: List<Category>,
+        val languages: List<ProgrammingLanguage>,
+        val dueCount: Int,
+        val verifiedCount: Int
     )
 
     fun onQueryChange(query: String) {

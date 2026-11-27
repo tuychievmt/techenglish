@@ -6,9 +6,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,6 +56,7 @@ import com.techenglish.app.core.designsystem.EmptyStateView
 import com.techenglish.app.core.designsystem.SkeletonListPlaceholder
 import com.techenglish.app.core.designsystem.TechColors
 import com.techenglish.app.core.designsystem.TtsVoiceStatusBanner
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.domain.model.ListeningMode
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -67,6 +70,7 @@ fun ListeningScreen(
     val voiceStatus by viewModel.voiceStatus.collectAsStateWithLifecycle()
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Аудирование и произношение") },
@@ -82,8 +86,9 @@ fun ListeningScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             TtsVoiceStatusBanner(
@@ -249,19 +254,30 @@ fun ListeningScreen(
                             enabled = state.evaluation == null,
                             label = { Text("Введите услышанную фразу на английском") },
                             placeholder = { Text("Type what you heard...") },
+                            supportingText = if (state.evaluation == null && state.dictationInput.isBlank()) {
+                                { Text("Прослушайте аудио и введите услышанный текст") }
+                            } else null,
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
 
                     val eval = state.evaluation
                     if (eval == null) {
+                        val canCheck = if (state.mode == ListeningMode.CHOOSE) {
+                            state.selectedOption != null
+                        } else {
+                            state.dictationInput.isNotBlank()
+                        }
+                        if (!canCheck && state.mode == ListeningMode.CHOOSE) {
+                            Text(
+                                text = "Выберите один из вариантов ответа выше",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         Button(
                             onClick = viewModel::submitCurrentAnswer,
-                            enabled = if (state.mode == ListeningMode.CHOOSE) {
-                                state.selectedOption != null
-                            } else {
-                                state.dictationInput.isNotBlank()
-                            },
+                            enabled = canCheck,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(50.dp)

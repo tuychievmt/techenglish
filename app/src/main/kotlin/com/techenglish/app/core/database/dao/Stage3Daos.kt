@@ -40,6 +40,9 @@ interface SyncQueueDao {
     @Query("UPDATE sync_queue SET retry_count = retry_count + 1, last_error = :error WHERE event_id = :eventId")
     suspend fun recordRetryFailure(eventId: String, error: String)
 
+    @Query("UPDATE sync_queue SET sync_status = 'FAILED', last_error = :error WHERE event_id = :eventId")
+    suspend fun markFailed(eventId: String, error: String)
+
     @Query("DELETE FROM sync_queue WHERE sync_status = 'SYNCED'")
     suspend fun pruneSynced()
 }

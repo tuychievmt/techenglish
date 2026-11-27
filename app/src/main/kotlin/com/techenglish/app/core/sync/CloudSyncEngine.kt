@@ -12,6 +12,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.techenglish.app.core.database.ContentPackImporter
+import com.techenglish.app.core.datastore.UserPreferencesDataStore
 import com.techenglish.app.core.database.dao.OtaContentMetaDao
 import com.techenglish.app.core.database.dao.SocialCacheDao
 import com.techenglish.app.core.database.dao.SyncQueueDao
@@ -22,6 +23,7 @@ import com.techenglish.app.core.database.entity.LeaderboardCacheEntity
 import com.techenglish.app.core.database.entity.OtaContentMetaEntity
 import com.techenglish.app.core.database.entity.SyncQueueEntity
 import com.techenglish.app.core.database.entity.WordEntity
+import com.techenglish.app.core.network.ProfileUpdateBodyDto
 import com.techenglish.app.core.network.Sm2ItemPayloadDto
 import com.techenglish.app.core.network.SyncBatchBodyDto
 import com.techenglish.app.core.network.SyncEventBodyDto
@@ -35,6 +37,9 @@ import com.techenglish.domain.usecase.ResolveSm2SyncConflictUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -52,8 +57,8 @@ data class SyncRunSummary(
  * ФТ-9.2 & ФТ-14.5 — Bidirectional Outbox Sync & Data-Only OTA Content Delivery Engine.
  */
 @Singleton
-class CloudSyncEngine @Inject constructor(
-    @ApplicationContext private val context: Context,
+class CloudSyncEngine private constructor(
+    private val context: Context,
     private val syncQueueDao: SyncQueueDao,
     private val socialCacheDao: SocialCacheDao,
     private val otaContentMetaDao: OtaContentMetaDao,
@@ -61,8 +66,61 @@ class CloudSyncEngine @Inject constructor(
     private val contentPackImporter: ContentPackImporter,
     private val apiClient: TechEnglishApiClient,
     private val tokenStore: AndroidKeystoreTokenStore,
-    private val resolveSm2Conflict: ResolveSm2SyncConflictUseCase
+    private val userPrefs: UserPreferencesDataStore?,
+    private val resolveSm2Conflict: ResolveSm2SyncConflictUseCase,
+    @Suppress("UNUSED_PARAMETER") primaryMarker: Unit
 ) {
+    @Inject
+    constructor(
+        @ApplicationContext context: Context,
+        syncQueueDao: SyncQueueDao,
+        socialCacheDao: SocialCacheDao,
+        otaContentMetaDao: OtaContentMetaDao,
+        wordDao: WordDao,
+        contentPackImporter: ContentPackImporter,
+        apiClient: TechEnglishApiClient,
+        tokenStore: AndroidKeystoreTokenStore,
+        userPrefs: UserPreferencesDataStore,
+        resolveSm2Conflict: ResolveSm2SyncConflictUseCase
+    ) : this(
+        context = context,
+        syncQueueDao = syncQueueDao,
+        socialCacheDao = socialCacheDao,
+        otaContentMetaDao = otaContentMetaDao,
+        wordDao = wordDao,
+        contentPackImporter = contentPackImporter,
+        apiClient = apiClient,
+        tokenStore = tokenStore,
+        userPrefs = userPrefs,
+        resolveSm2Conflict = resolveSm2Conflict,
+        primaryMarker = Unit
+    )
+
+    constructor(
+        context: Context,
+        syncQueueDao: SyncQueueDao,
+        socialCacheDao: SocialCacheDao,
+        otaContentMetaDao: OtaContentMetaDao,
+        wordDao: WordDao,
+        contentPackImporter: ContentPackImporter,
+        apiClient: TechEnglishApiClient,
+        tokenStore: AndroidKeystoreTokenStore,
+        resolveSm2Conflict: ResolveSm2SyncConflictUseCase
+    ) : this(
+        context = context,
+        syncQueueDao = syncQueueDao,
+        socialCacheDao = socialCacheDao,
+        otaContentMetaDao = otaContentMetaDao,
+        wordDao = wordDao,
+        contentPackImporter = contentPackImporter,
+        apiClient = apiClient,
+        tokenStore = tokenStore,
+        userPrefs = null,
+        resolveSm2Conflict = resolveSm2Conflict,
+        primaryMarker = Unit
+    )
+    private val syncMutex = Mutex()
+
     suspend fun enqueueOutboxEvent(
         eventType: SyncEventType,
         payloadJson: String = "{}",
@@ -83,9 +141,9 @@ class CloudSyncEngine @Inject constructor(
         return eventId
     }
 
-    suspend fun runFullSyncNow(): SyncRunSummary {
+    suspend fun runFullSyncNow(): SyncRunSummary = syncMutex.withLock {
         if (!apiClient.isNetworkAvailable()) {
-            return SyncRunSummary(
+            return@withLock SyncRunSummary(
                 isOffline = true,
                 messageRu = "Офлайн-режим: показан локальный кэш, события ждут в sync_queue."
             )
@@ -97,6 +155,7 @@ class CloudSyncEngine @Inject constructor(
         val token = tokenStore.getAccessToken()
 
         if (!token.isNullOrBlank()) {
+            pushPendingOnboardingProfileIfNeeded()
             val nowMs = System.currentTimeMillis()
             val studiedWords = wordDao.getStudiedWords()
             val favoriteTerms = wordDao.getFavoriteWords().map { it.term.trim().lowercase() }.distinct()
@@ -128,18 +187,25 @@ class CloudSyncEngine @Inject constructor(
                     favoriteTerms = favoriteTerms,
                     customWords = customWords
                 )
-                runCatching { apiClient.syncEvents(batch) }
-                    .onSuccess { res ->
-                        val doneIds = (res.acceptedEventIds + res.duplicateEventIds).distinct()
-                        if (doneIds.isNotEmpty()) {
-                            syncQueueDao.markSynced(doneIds)
-                            syncedCount = doneIds.size
+                try {
+                    val res = apiClient.syncEvents(batch)
+                    val doneIds = (res.acceptedEventIds + res.duplicateEventIds).distinct()
+                    if (doneIds.isNotEmpty()) {
+                        syncQueueDao.markSynced(doneIds)
+                        syncedCount = doneIds.size
+                    }
+                    res.rejectedEvents.forEach { rejected ->
+                        if (rejected.eventId.isNotBlank()) {
+                            syncQueueDao.markFailed(rejected.eventId, rejected.reason.ifBlank { "rejected" })
                         }
                     }
-                    .onFailure { err ->
-                        hadTransientFailure = true
-                        pending.forEach { syncQueueDao.recordRetryFailure(it.eventId, err.localizedMessage ?: "sync_error") }
-                    }
+                    syncQueueDao.pruneSynced()
+                } catch (ce: CancellationException) {
+                    throw ce
+                } catch (err: Exception) {
+                    hadTransientFailure = true
+                    pending.forEach { syncQueueDao.recordRetryFailure(it.eventId, err.localizedMessage ?: "sync_error") }
+                }
             }
 
             // Pull authoritative remote state via GET /v1/sync/state and merge via Errata E1 / R10
@@ -152,7 +218,7 @@ class CloudSyncEngine @Inject constructor(
         // Check & apply data-only OTA content packs (ФТ-14.5, Errata E3 & E4)
         val otaApplied = syncOtaContentPacks()
 
-        return SyncRunSummary(
+        SyncRunSummary(
             isOffline = false,
             syncedEventsCount = syncedCount,
             appliedOtaPacks = otaApplied,
@@ -371,6 +437,34 @@ class CloudSyncEngine @Inject constructor(
         return applied
     }
 
+    private suspend fun pushPendingOnboardingProfileIfNeeded() {
+        val localUserPrefs = userPrefs ?: return
+        val prefs = runCatching { localUserPrefs.preferencesFlow.first() }.getOrNull() ?: return
+        if (!prefs.pendingProfileSync) return
+        val desiredUsername = prefs.localUsername.trim().takeIf { it.isNotBlank() }
+        val desiredDisplayName = prefs.userName.trim().takeIf { it.isNotBlank() }
+        try {
+            val updated = apiClient.updateMyProfile(
+                ProfileUpdateBodyDto(
+                    username = desiredUsername,
+                    displayName = desiredDisplayName,
+                    statusText = "${prefs.developerRole.ifBlank { "Middle" }} Developer"
+                )
+            )
+            tokenStore.updateSessionProfile(username = updated.username)
+            localUserPrefs.setLocalUsername(updated.username)
+            localUserPrefs.setPendingProfileSync(false)
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (err: Exception) {
+            if (err is com.techenglish.app.core.network.ApiHttpException &&
+                (err.statusCode == 409 || err.statusCode == 422)
+            ) {
+                localUserPrefs.setPendingProfileSync(false)
+            }
+        }
+    }
+
     fun scheduleBackgroundSync() {
         runCatching {
             val constraints = Constraints.Builder()
@@ -412,10 +506,14 @@ class CloudSyncWorker @AssistedInject constructor(
     private val syncEngine: CloudSyncEngine
 ) : CoroutineWorker(appContext, params) {
 
-    override suspend fun doWork(): Result = runCatching {
-        val summary = syncEngine.runFullSyncNow()
-        if (summary.hadTransientFailure) Result.retry() else Result.success()
-    }.getOrElse {
-        Result.retry()
+    override suspend fun doWork(): Result {
+        return try {
+            val summary = syncEngine.runFullSyncNow()
+            if (summary.hadTransientFailure) Result.retry() else Result.success()
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (_: Exception) {
+            Result.retry()
+        }
     }
 }

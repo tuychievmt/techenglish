@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -45,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.ChameleonScenarioContainer
 import com.techenglish.app.core.designsystem.ComboStreakBanner
 import com.techenglish.app.core.designsystem.JetBrainsMonoFontFamily
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.rememberTechHaptics
 import com.techenglish.domain.model.ChameleonThemeType
 
@@ -63,6 +65,7 @@ fun DebugTheLogScreen(
     val challenge = state.currentChallenge
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Debug the Log · Тренажёр") },
@@ -81,7 +84,7 @@ fun DebugTheLogScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             ComboStreakBanner(comboState = state.comboStreak)
@@ -188,6 +191,14 @@ fun DebugTheLogScreen(
 
             val eval = state.evaluation
             if (eval == null) {
+                val canDiagnose = state.selectedRootCause != null && state.selectedReportTokens.isNotEmpty()
+                if (!canDiagnose) {
+                    Text(
+                        text = "Выберите вероятную причину и хотя бы один фрагмент отчёта",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -203,7 +214,7 @@ fun DebugTheLogScreen(
                             haptics.onWordTap()
                             viewModel.submitDiagnosis()
                         },
-                        enabled = state.selectedRootCause != null && state.selectedReportTokens.isNotEmpty(),
+                        enabled = canDiagnose,
                         modifier = Modifier.weight(2f)
                     ) {
                         Icon(Icons.Rounded.BugReport, contentDescription = null)

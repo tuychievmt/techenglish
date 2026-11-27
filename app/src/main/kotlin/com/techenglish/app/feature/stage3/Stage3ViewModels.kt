@@ -7,6 +7,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.techenglish.app.core.database.dao.OtaContentMetaDao
 import com.techenglish.app.core.database.dao.SocialCacheDao
+import com.techenglish.app.core.database.dao.SquadCacheDao
 import com.techenglish.app.core.database.dao.SyncQueueDao
 import com.techenglish.app.core.database.entity.ActivityFeedCacheEntity
 import com.techenglish.app.core.database.entity.BadgesCacheEntity
@@ -44,6 +45,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
@@ -75,6 +77,7 @@ class CloudAccountSyncViewModel @Inject constructor(
     private val tokenStore: AndroidKeystoreTokenStore,
     private val syncQueueDao: SyncQueueDao,
     private val socialCacheDao: SocialCacheDao,
+    private val squadCacheDao: SquadCacheDao,
     private val otaContentMetaDao: OtaContentMetaDao,
     private val apiClient: TechEnglishApiClient,
     private val cloudSyncEngine: CloudSyncEngine,
@@ -85,8 +88,14 @@ class CloudAccountSyncViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val isBusyFlow = MutableStateFlow(false)
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events.asSharedFlow()
+
+    init {
+        viewModelScope.launch {
+            oauthCallbackHandler.events.collect { msg -> _events.emit(msg) }
+        }
+    }
 
     val uiState: StateFlow<CloudAccountSyncUiState> = combine(
         tokenStore.sessionFlow,
@@ -200,6 +209,10 @@ class CloudAccountSyncViewModel @Inject constructor(
      */
     fun startOAuthLogin(context: Context, provider: AuthProvider) {
         viewModelScope.launch {
+            if (!apiClient.isNetworkAvailable()) {
+                _events.emit("Офлайн-режим: вход через OAuth требует подключения к интернету.")
+                return@launch
+            }
             val uri = oauthCallbackHandler.prepareAuthorizeUrl(provider)
             oauthCallbackHandler.launchCustomTab(context, uri)
         }
@@ -255,9 +268,16 @@ class CloudAccountSyncViewModel @Inject constructor(
     fun syncNow() {
         viewModelScope.launch {
             isBusyFlow.value = true
-            val summary = cloudSyncEngine.runFullSyncNow()
-            _events.emit(summary.messageRu)
-            isBusyFlow.value = false
+            try {
+                val summary = cloudSyncEngine.runFullSyncNow()
+                _events.emit(summary.messageRu)
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
+                _events.emit("Ошибка синхронизации: ${err.localizedMessage ?: "повторите попытку"}")
+            } finally {
+                isBusyFlow.value = false
+            }
         }
     }
 
@@ -268,12 +288,19 @@ class CloudAccountSyncViewModel @Inject constructor(
                 return@launch
             }
             isBusyFlow.value = true
-            val applied = cloudSyncEngine.syncOtaContentPacks()
-            _events.emit(
-                if (applied > 0) "Установлено новых OTA-пакетов: $applied (SHA-256 подтверждён)."
-                else "База контента актуальна, новых OTA-пакетов нет."
-            )
-            isBusyFlow.value = false
+            try {
+                val applied = cloudSyncEngine.syncOtaContentPacks()
+                _events.emit(
+                    if (applied > 0) "Установлено новых OTA-пакетов: $applied (SHA-256 подтверждён)."
+                    else "База контента актуальна, новых OTA-пакетов нет."
+                )
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
+                _events.emit("Ошибка загрузки OTA: ${err.localizedMessage ?: "повторите попытку"}")
+            } finally {
+                isBusyFlow.value = false
+            }
         }
     }
 
@@ -288,15 +315,25 @@ class CloudAccountSyncViewModel @Inject constructor(
         viewModelScope.launch {
             tokenStore.clearSession()
             apiClient.clearAuthCache()
+            socialCacheDao.clearProfile()
+            socialCacheDao.clearAccountLink()
+            socialCacheDao.clearFriends()
+            socialCacheDao.clearActivityFeed()
+            LeaderboardTab.entries.forEach { socialCacheDao.clearLeaderboardTab(it.name) }
+            squadCacheDao.clearSquad()
             _events.emit("Выход выполнен. Локальный офлайн-прогресс сохранён.")
         }
     }
 
     fun deleteAccountAndCloudData() {
         viewModelScope.launch {
+            if (!uiState.value.session.isGuest && !apiClient.isNetworkAvailable()) {
+                _events.emit("Удаление облачного аккаунта требует подключения к интернету.")
+                return@launch
+            }
             isBusyFlow.value = true
-            runCatching {
-                if (!uiState.value.session.isGuest && apiClient.isNetworkAvailable()) {
+            try {
+                if (!uiState.value.session.isGuest) {
                     apiClient.deleteAccount()
                 }
                 tokenStore.clearSession()
@@ -306,11 +343,15 @@ class CloudAccountSyncViewModel @Inject constructor(
                 socialCacheDao.clearFriends()
                 socialCacheDao.clearActivityFeed()
                 LeaderboardTab.entries.forEach { socialCacheDao.clearLeaderboardTab(it.name) }
+                squadCacheDao.clearSquad()
                 _events.emit("Облачный аккаунт и кэш удалены. Приложение переведено в гостевой режим.")
-            }.onFailure { err ->
+            } catch (ce: kotlinx.coroutines.CancellationException) {
+                throw ce
+            } catch (err: Exception) {
                 _events.emit("Ошибка удаления аккаунта: ${err.localizedMessage ?: "повторите онлайн"}")
+            } finally {
+                isBusyFlow.value = false
             }
-            isBusyFlow.value = false
         }
     }
 
@@ -374,49 +415,65 @@ class DeveloperCardViewModel @Inject constructor(
 
     private suspend fun seedAndRefreshLocalBadges() {
         val now = System.currentTimeMillis()
-        val daily = uiState.value.dailyProgress
+        val daily = runCatching { getDailyProgress().first() }.getOrNull()
+        val existingById = runCatching { socialCacheDao.observeBadges().first() }.getOrDefault(emptyList())
+            .associateBy { it.id }
         val xp = daily?.levelProgress?.totalXp ?: 0
         val streak = daily?.streakDays ?: 0
+
+        fun badge(id: String, title: String, desc: String, icon: String, unlockedNow: Boolean): BadgesCacheEntity {
+            val prev = existingById[id]
+            val unlocked = unlockedNow || (prev?.isUnlocked == true)
+            val unlockedAt = when {
+                prev?.isUnlocked == true && prev.unlockedAt > 0L -> prev.unlockedAt
+                unlocked -> now
+                else -> 0L
+            }
+            return BadgesCacheEntity(
+                id = id,
+                titleRu = title,
+                descriptionRu = desc,
+                iconKey = icon,
+                isUnlocked = unlocked,
+                unlockedAt = unlockedAt
+            )
+        }
+
         val defaults = listOf(
-            BadgesCacheEntity(
+            badge(
                 id = "badge_offline_pioneer",
-                titleRu = "Offline-First Pioneer",
-                descriptionRu = "Активировал TechEnglish v3 и начал локальное обучение",
-                iconKey = "terminal",
-                isUnlocked = true,
-                unlockedAt = now
+                title = "Offline-First Pioneer",
+                desc = "Активировал TechEnglish и начал локальное обучение",
+                icon = "terminal",
+                unlockedNow = true
             ),
-            BadgesCacheEntity(
+            badge(
                 id = "badge_streak_7",
-                titleRu = "7-Day Commit Streak",
-                descriptionRu = "Учебная серия 7 дней подряд без пропусков",
-                iconKey = "flame",
-                isUnlocked = streak >= 7,
-                unlockedAt = if (streak >= 7) now else 0L
+                title = "7-Day Commit Streak",
+                desc = "Учебная серия 7 дней подряд без пропусков",
+                icon = "flame",
+                unlockedNow = streak >= 7
             ),
-            BadgesCacheEntity(
+            badge(
                 id = "badge_xp_500",
-                titleRu = "Senior Lexicon",
-                descriptionRu = "Набрано 500+ XP в словаре и тренажёрах",
-                iconKey = "bolt",
-                isUnlocked = xp >= 500,
-                unlockedAt = if (xp >= 500) now else 0L
+                title = "Senior Lexicon",
+                desc = "Набрано 500+ XP в словаре и тренажёрах",
+                icon = "bolt",
+                unlockedNow = xp >= 500
             ),
-            BadgesCacheEntity(
+            badge(
                 id = "badge_log_debugger",
-                titleRu = "Stacktrace Detective",
-                descriptionRu = "Пройдены разборы реальных логов и документации",
-                iconKey = "bug",
-                isUnlocked = xp >= 100,
-                unlockedAt = if (xp >= 100) now else 0L
+                title = "Stacktrace Detective",
+                desc = "Пройдены разборы реальных логов и документации",
+                icon = "bug",
+                unlockedNow = xp >= 100
             ),
-            BadgesCacheEntity(
+            badge(
                 id = "badge_polyglot",
-                titleRu = "19-Language Polyglot",
-                descriptionRu = "Сравнение синтаксиса языков в каталоге",
-                iconKey = "code",
-                isUnlocked = xp >= 150,
-                unlockedAt = if (xp >= 150) now else 0L
+                title = "19-Language Polyglot",
+                desc = "Сравнение синтаксиса языков в каталоге",
+                icon = "code",
+                unlockedNow = xp >= 150
             )
         )
         socialCacheDao.insertBadges(defaults)
@@ -447,6 +504,11 @@ class DeveloperCardViewModel @Inject constructor(
             val cleanTechStackCsv = techStackCsv.trim().take(120)
             val cleanGithub = githubUrl.trim().take(160)
             val cleanTelegram = telegramHandle.trim().take(64)
+            settingsRepository.setLocalUsername(cleanUsername)
+            settingsRepository.setUserName(cleanDisplayName)
+            if (!current.session.isGuest) {
+                tokenStore.updateSessionProfile(username = cleanUsername)
+            }
             socialCacheDao.upsertProfile(
                 UserProfileCacheEntity(
                     userId = current.session.userId,
@@ -601,7 +663,7 @@ class FriendsAndFeedViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val isBusyFlow = MutableStateFlow(false)
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     val uiState: StateFlow<FriendsAndFeedUiState> = combine(

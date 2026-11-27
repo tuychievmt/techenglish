@@ -100,15 +100,21 @@ class OnDeviceSpeechRecognizerHelper @Inject constructor(
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
-        recognizer.startListening(intent)
-        return true
+        return runCatching {
+            recognizer.startListening(intent)
+            true
+        }.getOrElse { exc ->
+            runCatching { recognizer.destroy() }
+            activeRecognizer = null
+            onError(exc.localizedMessage ?: "Не удалось запустить распознавание речи")
+            false
+        }
     }
 
     fun stopListening() {
-        runCatching {
-            activeRecognizer?.stopListening()
-            activeRecognizer?.destroy()
-        }
+        val current = activeRecognizer
         activeRecognizer = null
+        runCatching { current?.stopListening() }
+        runCatching { current?.destroy() }
     }
 }

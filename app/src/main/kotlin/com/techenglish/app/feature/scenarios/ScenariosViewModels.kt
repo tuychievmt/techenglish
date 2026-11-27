@@ -207,17 +207,28 @@ class ScenarioExerciseViewModel @Inject constructor(
         _uiState.value = _uiState.value.copy(selectedSentenceBlocks = emptyList())
     }
 
+    @Volatile
+    private var isSubmittingAnswer = false
+
     fun submitAnswer() {
+        if (isSubmittingAnswer) return
         val state = _uiState.value
+        if (state.submissionResult != null) return
         val scenario = state.scenario ?: return
         val answer = state.currentUserAnswer
         if (answer.isBlank()) return
+        isSubmittingAnswer = true
         viewModelScope.launch {
-            val result = submitScenarioAnswer(scenario, answer)
-            _uiState.value = state.copy(
-                submissionResult = result,
-                comboState = ComboStreakTracker.nextState(state.comboState, result.isCorrect)
-            )
+            try {
+                val result = submitScenarioAnswer(scenario, answer)
+                val latest = _uiState.value
+                _uiState.value = latest.copy(
+                    submissionResult = result,
+                    comboState = ComboStreakTracker.nextState(latest.comboState, result.isCorrect)
+                )
+            } finally {
+                isSubmittingAnswer = false
+            }
         }
     }
 

@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -15,9 +16,11 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,6 +38,7 @@ import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.RateReview
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Star
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.Wifi
 import androidx.compose.material3.AlertDialog
@@ -74,6 +78,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.feature.stage3.OfflineModeBanner
 import com.techenglish.domain.model.PeerReviewSubmission
 import com.techenglish.domain.model.PvpMatchMode
@@ -121,6 +126,7 @@ fun ThematicRoomsContent(
     var moderationTarget by remember { mutableStateOf<RoomChatMessage?>(null) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Тематические комнаты (Rooms)") },
@@ -136,8 +142,9 @@ fun ThematicRoomsContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -195,6 +202,10 @@ fun ThematicRoomsContent(
                             value = draft,
                             onValueChange = { draft = it },
                             label = { Text("Сообщение в ${state.selectedRoom.title}") },
+                            supportingText = {
+                                val len = draft.trim().length
+                                if (len in 0..4) Text("Минимум 5 символов ($len/5)")
+                            },
                             singleLine = true,
                             modifier = Modifier.weight(1f)
                         )
@@ -285,6 +296,11 @@ fun PvpDuelScreen(
         viewModel.events.collect { snackbarHostState.showSnackbar(it) }
     }
 
+    BackHandler {
+        viewModel.handleDisconnectGracefully()
+        onBack()
+    }
+
     PvpDuelContent(
         state = state,
         snackbarHostState = snackbarHostState,
@@ -311,6 +327,7 @@ fun PvpDuelContent(
     onDisconnect: () -> Unit
 ) {
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("1v1 PvP-дуэль (WebSockets)") },
@@ -327,7 +344,7 @@ fun PvpDuelContent(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (state.isOffline) {
@@ -400,13 +417,14 @@ fun PvpDuelContent(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Row(
-                                modifier = Modifier.padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
                                     text = "${state.mode.labelRu} • Вопрос ${state.currentQuestionIndex + 1}/${state.questions.size} • Вы ${state.playerScore}:${state.opponentScore} Соперник",
-                                    style = MaterialTheme.typography.labelLarge
+                                    style = MaterialTheme.typography.labelLarge,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Icon(Icons.Rounded.Timer, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -539,6 +557,7 @@ fun PeerReviewArenaContent(
     var moderationTarget by remember { mutableStateOf<PeerReviewSubmission?>(null) }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Peer Review Arena") },
@@ -559,8 +578,9 @@ fun PeerReviewArenaContent(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             if (state.isOffline) {
@@ -605,6 +625,12 @@ fun PeerReviewArenaContent(
                             value = answerText,
                             onValueChange = { answerText = it },
                             label = { Text("Ваш ответ на английском (минимум 15 символов)") },
+                            supportingText = {
+                                val len = answerText.trim().length
+                                if (state.recordedVoiceClip == null && len < 15) {
+                                    Text("Напишите ещё ${15 - len} симв. или запишите голос")
+                                }
+                            },
                             minLines = 3,
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -708,11 +734,22 @@ fun PeerReviewArenaContent(
                             }
                         }
                         sub.feedbackList.forEach { fb ->
-                            Text(
-                                text = "★${fb.ratingStars} @${fb.reviewerUsername}: ${fb.commentText}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Star,
+                                    contentDescription = null,
+                                    tint = TechColors.Amber,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "${fb.ratingStars} @${fb.reviewerUsername}: ${fb.commentText}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
                         }
                         FilledTonalButton(
                             onClick = { feedbackTarget = sub },
@@ -734,13 +771,26 @@ fun PeerReviewArenaContent(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         (1..5).forEach { s ->
-                            FilterChip(selected = stars == s, onClick = { stars = s }, label = { Text("$s★") })
+                            FilterChip(
+                                selected = stars == s,
+                                onClick = { stars = s },
+                                label = {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text("$s", style = MonoTagTextStyle)
+                                        Icon(Icons.Rounded.Star, contentDescription = null, modifier = Modifier.size(13.dp))
+                                    }
+                                }
+                            )
                         }
                     }
                     OutlinedTextField(
                         value = comment,
                         onValueChange = { comment = it },
                         label = { Text("Разбор формулировок и советы") },
+                        supportingText = {
+                            val len = comment.trim().length
+                            if (len in 0..4) Text("Минимум 5 символов ($len/5)")
+                        },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

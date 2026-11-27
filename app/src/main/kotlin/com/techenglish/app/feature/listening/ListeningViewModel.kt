@@ -75,13 +75,16 @@ class ListeningViewModel @Inject constructor(
         }
     }
 
+    @Volatile
+    private var isSubmittingAnswer = false
+
     fun setMode(mode: ListeningMode) {
-        if (mode == _uiState.value.mode) return
-        _uiState.value = _uiState.value.copy(
+        val cur = _uiState.value
+        if (mode == cur.mode || cur.evaluation != null) return
+        _uiState.value = cur.copy(
             mode = mode,
             selectedOption = null,
-            dictationInput = "",
-            evaluation = null
+            dictationInput = ""
         )
     }
 
@@ -106,6 +109,7 @@ class ListeningViewModel @Inject constructor(
     }
 
     fun submitCurrentAnswer() {
+        if (isSubmittingAnswer) return
         val state = _uiState.value
         val question = state.currentQuestion ?: return
         if (state.evaluation != null) return
@@ -121,13 +125,19 @@ class ListeningViewModel @Inject constructor(
             }
         }
 
+        isSubmittingAnswer = true
         viewModelScope.launch {
-            logAttempt(question.wordId, eval)
-            _uiState.value = state.copy(
-                evaluation = eval,
-                correctCount = state.correctCount + if (eval.isCorrect) 1 else 0,
-                xpEarned = state.xpEarned + eval.xpEarned
-            )
+            try {
+                logAttempt(question.wordId, eval)
+                val latest = _uiState.value
+                _uiState.value = latest.copy(
+                    evaluation = eval,
+                    correctCount = latest.correctCount + if (eval.isCorrect) 1 else 0,
+                    xpEarned = latest.xpEarned + eval.xpEarned
+                )
+            } finally {
+                isSubmittingAnswer = false
+            }
         }
     }
 

@@ -7,8 +7,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -53,8 +55,11 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.techenglish.app.core.designsystem.DEFAULT_ACADEMIC_TERMS_COUNT
 import com.techenglish.app.core.designsystem.MonoTagTextStyle
 import com.techenglish.app.core.designsystem.TechColors
+import com.techenglish.app.core.designsystem.formatCountSpaced
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.domain.model.AuthProvider
 
 // =========================================================================
@@ -85,6 +90,7 @@ fun CloudAccountSyncScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Аккаунт, синхронизация и OTA") },
@@ -100,8 +106,9 @@ fun CloudAccountSyncScreen(
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+                .padding(padding)
+                .imePadding(),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             if (state.isOffline) {
@@ -188,8 +195,16 @@ fun CloudAccountSyncScreen(
                 }
             }
 
-            // Auth form when in guest mode
+            // Auth form & Cloud Sync Hero when in guest mode
             if (state.session.isGuest) {
+                item {
+                    CloudAuthHeroSection(
+                        onGoogleClick = { viewModel.startOAuthLogin(context, AuthProvider.GOOGLE) },
+                        onGithubClick = { viewModel.startOAuthLogin(context, AuthProvider.GITHUB) },
+                        onContinueAsGuest = onBack,
+                        isOnboarding = false
+                    )
+                }
                 item {
                     ElevatedCard(modifier = Modifier.fillMaxWidth()) {
                         Column(
@@ -255,25 +270,6 @@ fun CloudAccountSyncScreen(
                             ) {
                                 Text(if (isRegisterMode) "Создать аккаунт и синхронизировать" else "Войти по Email")
                             }
-
-                            HorizontalDivider()
-                            Text(
-                                text = "Быстрый вход OAuth 2.0 (PKCE S256):",
-                                style = MaterialTheme.typography.labelLarge
-                            )
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { viewModel.startOAuthLogin(context, AuthProvider.GITHUB) },
-                                    modifier = Modifier.weight(1f)
-                                ) { Text("GitHub PKCE") }
-                                OutlinedButton(
-                                    onClick = { viewModel.startOAuthLogin(context, AuthProvider.GOOGLE) },
-                                    modifier = Modifier.weight(1f)
-                                ) { Text("Google PKCE") }
-                            }
                         }
                     }
                 }
@@ -300,7 +296,7 @@ fun CloudAccountSyncScreen(
                         )
                         if (state.appliedOtaPacks.isEmpty()) {
                             Text(
-                                text = "Установленные OTA-пакеты: встроенная офлайн-база v6 (20 658+ терминов).",
+                                text = "Установленные OTA-пакеты: встроенная офлайн-база v6 (${formatCountSpaced(DEFAULT_ACADEMIC_TERMS_COUNT)} терминов).",
                                 style = MonoTagTextStyle,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

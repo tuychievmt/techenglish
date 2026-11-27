@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -73,6 +74,7 @@ import com.techenglish.app.core.designsystem.SkeletonListPlaceholder
 import com.techenglish.app.core.designsystem.StatusBadge
 import com.techenglish.app.core.designsystem.TechColors
 import com.techenglish.app.core.designsystem.ensureAccessibleAccent
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.parseHexColor
 import com.techenglish.app.core.designsystem.rememberTechHaptics
 import com.techenglish.domain.model.KeywordTooltip
@@ -95,6 +97,7 @@ fun CodeBreakdownScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -140,7 +143,7 @@ fun CodeBreakdownScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = navigationBarContentPadding(),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item {
@@ -383,12 +386,14 @@ fun InteractiveCodeBlock(
                     val annotated = remember(rawLine, languageSlug, isDark, keywords) {
                         CodeSyntaxHighlighter.highlightLine(rawLine, languageSlug, isDark, keywords)
                     }
+                    val latestOnLineClick by androidx.compose.runtime.rememberUpdatedState(onLineClick)
+                    val latestOnKeywordClick by androidx.compose.runtime.rememberUpdatedState(onKeywordClick)
                     var layoutResult by remember(rawLine) { mutableStateOf<TextLayoutResult?>(null) }
 
                     Row(
                         modifier = Modifier
                             .background(if (selectedLine == lineNum) highlightRowColor else Color.Transparent)
-                            .clickable { onLineClick(lineNum) }
+                            .clickable { latestOnLineClick(lineNum) }
                             .padding(end = 16.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
@@ -411,7 +416,7 @@ fun InteractiveCodeBlock(
                             style = CodeTextStyle,
                             softWrap = false,
                             onTextLayout = { layoutResult = it },
-                            modifier = Modifier.pointerInput(annotated) {
+                            modifier = Modifier.pointerInput(annotated, lineNum) {
                                 detectTapGestures { offset ->
                                     val pos = layoutResult?.getOffsetForPosition(offset) ?: return@detectTapGestures
                                     val kwHit = annotated.getStringAnnotations(
@@ -420,9 +425,9 @@ fun InteractiveCodeBlock(
                                         end = pos
                                     ).firstOrNull()
                                     if (kwHit != null) {
-                                        onKeywordClick(kwHit.item)
+                                        latestOnKeywordClick(kwHit.item)
                                     } else {
-                                        onLineClick(lineNum)
+                                        latestOnLineClick(lineNum)
                                     }
                                 }
                             }

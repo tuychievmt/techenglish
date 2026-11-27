@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -83,46 +84,59 @@ class FlashcardsViewModel @Inject constructor(
         _uiState.value = current.copy(isFlipped = !current.isFlipped)
     }
 
+    @Volatile
+    private var isRatingSubmissionInFlight = false
+
     fun rateCurrentCard(quality: ReviewQuality) {
+        if (isRatingSubmissionInFlight) return
         val state = _uiState.value
         val word = state.currentWord ?: return
+        isRatingSubmissionInFlight = true
         viewModelScope.launch {
-            reviewWord(word, quality)
-            val gainedXp = if (quality.isCorrect) ReviewWordUseCase.XP_FLASHCARD_CORRECT else ReviewWordUseCase.XP_FLASHCARD_RETRY
-            val updatedQueue = state.queue.toMutableList()
-            // If user forgot (q=1), re-queue once at end of session for immediate reinforcement
-            if (quality == ReviewQuality.FORGOT && updatedQueue.count { it.id == word.id } < 2) {
-                updatedQueue.add(
-                    word.copy(repetitions = 0, intervalDays = 0, nextReviewAt = 0L)
-                )
+            try {
+                reviewWord(word, quality)
+                val gainedXp = if (quality.isCorrect) ReviewWordUseCase.XP_FLASHCARD_CORRECT else ReviewWordUseCase.XP_FLASHCARD_RETRY
+                _uiState.update { latest ->
+                    val updatedQueue = latest.queue.toMutableList()
+                    // If user forgot (q=1), re-queue once at end of session for immediate reinforcement
+                    if (quality == ReviewQuality.FORGOT && updatedQueue.count { it.id == word.id } < 2) {
+                        updatedQueue.add(
+                            word.copy(repetitions = 0, intervalDays = 0, nextReviewAt = 0L)
+                        )
+                    }
+                    val nextIdx = latest.currentIndex + 1
+                    val finished = nextIdx >= updatedQueue.size
+                    val nextWord = updatedQueue.getOrNull(nextIdx)
+                    latest.copy(
+                        queue = updatedQueue,
+                        currentIndex = nextIdx,
+                        isFlipped = false,
+                        reviewedCount = latest.reviewedCount + 1,
+                        correctCount = latest.correctCount + if (quality.isCorrect) 1 else 0,
+                        xpEarned = latest.xpEarned + gainedXp,
+                        comboState = ComboStreakTracker.nextState(latest.comboState, quality.isCorrect),
+                        intervalPreviews = nextWord?.let { calculateNextReview.previewIntervals(it) }.orEmpty(),
+                        isSessionFinished = finished
+                    )
+                }
+            } finally {
+                isRatingSubmissionInFlight = false
             }
-            val nextIdx = state.currentIndex + 1
-            val finished = nextIdx >= updatedQueue.size
-            val nextWord = updatedQueue.getOrNull(nextIdx)
-            _uiState.value = state.copy(
-                queue = updatedQueue,
-                currentIndex = nextIdx,
-                isFlipped = false,
-                reviewedCount = state.reviewedCount + 1,
-                correctCount = state.correctCount + if (quality.isCorrect) 1 else 0,
-                xpEarned = state.xpEarned + gainedXp,
-                comboState = ComboStreakTracker.nextState(state.comboState, quality.isCorrect),
-                intervalPreviews = nextWord?.let { calculateNextReview.previewIntervals(it) }.orEmpty(),
-                isSessionFinished = finished
-            )
         }
     }
 
     fun toggleCurrentFavorite() {
-        val state = _uiState.value
-        val word = state.currentWord ?: return
+        val word = _uiState.value.currentWord ?: return
         viewModelScope.launch {
             val nextFav = !word.isFavorite
             toggleFavorite(word.id, nextFav)
-            val updated = state.queue.map {
-                if (it.id == word.id) it.copy(isFavorite = nextFav) else it
+            _uiState.update { latest ->
+                latest.copy(
+                    queue = latest.queue.map {
+                        if (it.id == word.id) it.copy(isFavorite = nextFav) else it
+                    }
+                )
             }
-            _uiState.value = state.copy(queue = updated)
         }
     }
 

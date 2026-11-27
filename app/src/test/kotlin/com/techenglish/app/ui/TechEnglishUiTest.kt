@@ -16,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.Density
 import androidx.test.core.app.ApplicationProvider
 import com.techenglish.app.core.audio.TechAudioController
@@ -680,6 +681,43 @@ class TechEnglishUiTest {
         composeRule.onNodeWithText("Согласие на обработку текста AI-прокси (ФТ-8.3)").assertIsDisplayed()
         composeRule.onNodeWithText("Принять условия и включить AI-ментора").performClick()
         assertTrue(accepted)
+    }
+
+    @Test
+    fun `AI Mentor preserves input on error, displays error banner, and shows min-length counter in PR Reviewer`() {
+        val stateHolder = androidx.compose.runtime.mutableStateOf(
+            AiMentorUiState(consentAccepted = true, selectedTabIndex = 0)
+        )
+        composeRule.setContent {
+            TechEnglishTheme {
+                AiMentorContent(
+                    state = stateHolder.value,
+                    onBack = {},
+                    onAcceptConsent = {},
+                    onSelectTab = { stateHolder.value = stateHolder.value.copy(selectedTabIndex = it) },
+                    onSelectRole = {},
+                    onSelectLevel = {},
+                    onSubmitInterview = {
+                        stateHolder.value = stateHolder.value.copy(
+                            errorMessage = "Войдите в облачный аккаунт (Профиль → Облако и Sync), чтобы отправлять ответы AI-ментору."
+                        )
+                    },
+                    onSubmitPrReview = {}
+                )
+            }
+        }
+        composeRule.onNodeWithText("Минимум 3 символа (0/3)").assertIsDisplayed()
+        composeRule.onNodeWithText("Ваш ответ на английском...").performTextInput("Use Redis idempotency key")
+        composeRule.onNodeWithText("Отправить →").performClick()
+        // Error banner is displayed AND user input is NOT wiped on failure
+        composeRule.onNodeWithText(
+            "Войдите в облачный аккаунт (Профиль → Облако и Sync), чтобы отправлять ответы AI-ментору."
+        ).assertIsDisplayed()
+        composeRule.onNodeWithText("Use Redis idempotency key").assertIsDisplayed()
+
+        // Switch to Code / PR Reviewer and verify identical min-length hint
+        composeRule.onNodeWithText("Code / PR Reviewer").performClick()
+        composeRule.onNodeWithText("Минимум 3 символа (0/3)").assertIsDisplayed()
     }
 
     @Test

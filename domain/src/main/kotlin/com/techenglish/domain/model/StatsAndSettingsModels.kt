@@ -140,7 +140,11 @@ data class UserSettings(
     val translationLanguage: TranslationLanguage = TranslationLanguage.RU,
     val ageVerified16Plus: Boolean = false,
     val allowFriendPings: Boolean = true,
-    val aiConsentAccepted: Boolean = false
+    val aiConsentAccepted: Boolean = false,
+    val isInitialSetupCompleted: Boolean = false,
+    val localUsername: String = "",
+    val developerRole: String = "Middle",
+    val pendingProfileSync: Boolean = false
 )
 
 data class ComboStreakState(

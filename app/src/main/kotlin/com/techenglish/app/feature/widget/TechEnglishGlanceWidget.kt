@@ -7,9 +7,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.Image
+import androidx.glance.ImageProvider
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
@@ -28,12 +31,14 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.techenglish.app.MainActivity
+import com.techenglish.app.R
 import com.techenglish.app.core.designsystem.resolveColorSchemeForMode
 import com.techenglish.app.core.notifications.NotificationConstants
 import com.techenglish.domain.model.ThemeMode
@@ -171,27 +176,34 @@ class TechEnglishGlanceWidget : GlanceAppWidget() {
                     )
                 )
                 Spacer(modifier = GlanceModifier.defaultWeight())
-                Text(
-                    text = "🔥 ${snapshot.streakDays} дн.",
-                    style = TextStyle(
-                        color = streakColor,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold
+                Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                    Image(
+                        provider = ImageProvider(R.drawable.ic_widget_streak),
+                        contentDescription = "Серия",
+                        colorFilter = ColorFilter.tint(streakColor),
+                        modifier = GlanceModifier.size(14.dp)
                     )
-                )
+                    Spacer(modifier = GlanceModifier.width(3.dp))
+                    Text(
+                        text = "${snapshot.streakDays} дн.",
+                        style = TextStyle(
+                            color = streakColor,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    )
+                }
                 Spacer(modifier = GlanceModifier.width(8.dp))
-                Text(
-                    text = "↻",
-                    style = TextStyle(
-                        color = accentColor,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
+                Image(
+                    provider = ImageProvider(R.drawable.ic_widget_refresh),
+                    contentDescription = "Обновить слово",
+                    colorFilter = ColorFilter.tint(accentColor),
                     modifier = GlanceModifier
+                        .size(24.dp)
                         .background(badgeBg)
                         .cornerRadius(8.dp)
                         .clickable(actionRunCallback<RefreshWidgetWordAction>())
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .padding(4.dp)
                 )
             }
 

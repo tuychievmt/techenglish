@@ -296,7 +296,11 @@ fun StoredUserPreferences.toDomain(): UserSettings = UserSettings(
     translationLanguage = TranslationLanguage.fromRaw(translationLanguage),
     ageVerified16Plus = ageVerified16Plus,
     allowFriendPings = allowFriendPings,
-    aiConsentAccepted = aiConsentAccepted
+    aiConsentAccepted = aiConsentAccepted,
+    isInitialSetupCompleted = isInitialSetupCompleted,
+    localUsername = localUsername,
+    developerRole = developerRole,
+    pendingProfileSync = pendingProfileSync
 )
 
 fun AcademicTermEntity.toDomain(): AcademicTerm = AcademicTerm(

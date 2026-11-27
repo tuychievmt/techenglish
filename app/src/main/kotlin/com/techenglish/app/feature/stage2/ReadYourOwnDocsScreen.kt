@@ -2,6 +2,7 @@ package com.techenglish.app.feature.stage2
 
 import androidx.compose.runtime.getValue
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -10,8 +11,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -49,6 +52,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import com.techenglish.app.core.designsystem.DEFAULT_ACADEMIC_TERMS_COUNT
+import com.techenglish.app.core.designsystem.formatCountSpaced
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -76,6 +82,10 @@ fun ReadYourOwnDocsScreen(
     val context = LocalContext.current
     val haptics = rememberTechHaptics()
 
+    BackHandler(enabled = state.activeDoc != null) {
+        viewModel.closeActiveDoc()
+    }
+
     val openDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -86,6 +96,7 @@ fun ReadYourOwnDocsScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = {
@@ -111,6 +122,7 @@ fun ReadYourOwnDocsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .imePadding()
                 .padding(horizontal = 16.dp)
         ) {
             state.statusMessage?.let { msg ->
@@ -133,7 +145,7 @@ fun ReadYourOwnDocsScreen(
             if (state.isScanning) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp))
                 Text(
-                    text = "Сканируем n-граммы по словарю 20 658 терминов...",
+                    text = "Сканируем n-граммы по словарю ${formatCountSpaced(DEFAULT_ACADEMIC_TERMS_COUNT)} терминов...",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -145,7 +157,7 @@ fun ReadYourOwnDocsScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(bottom = 24.dp),
+                        .padding(navigationBarContentPadding(horizontal = 0.dp, top = 0.dp)),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Surface(
@@ -229,7 +241,7 @@ fun ReadYourOwnDocsScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp),
+                    contentPadding = navigationBarContentPadding(horizontal = 0.dp, top = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
@@ -252,7 +264,9 @@ fun ReadYourOwnDocsScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 FilledTonalButton(
-                                    onClick = { openDocLauncher.launch(arrayOf("text/*", "application/octet-stream")) },
+                                    onClick = {
+                                        runCatching { openDocLauncher.launch(arrayOf("text/*", "application/octet-stream")) }
+                                    },
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Icon(Icons.Rounded.FileOpen, contentDescription = null)

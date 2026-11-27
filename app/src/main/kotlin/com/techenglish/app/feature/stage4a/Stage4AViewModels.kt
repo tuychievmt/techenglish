@@ -544,7 +544,7 @@ class CommunityDecksViewModel @Inject constructor(
                 }
             }
             communityDecksDao.updateDeckRating(deck.id, updatedRating)
-            _events.emit("Оценка ${safeStars}★ сохранена для «${deck.title}».")
+            _events.emit("Оценка $safeStars/5 сохранена для «${deck.title}».")
         }
     }
 

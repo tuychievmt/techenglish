@@ -59,13 +59,20 @@ class PeerReviewArenaViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(PeerReviewArenaUiState(isOffline = !apiClient.isNetworkAvailable()))
     val uiState: StateFlow<PeerReviewArenaUiState> = _uiState
-    private val _events = MutableSharedFlow<String>()
+    private val _events = MutableSharedFlow<String>(extraBufferCapacity = 8)
     val events: SharedFlow<String> = _events.asSharedFlow()
 
     private var recordingTimerJob: Job? = null
 
     init {
         refresh()
+        viewModelScope.launch {
+            audioController.playbackState.collect { pb ->
+                if (!pb.isPlaying && _uiState.value.playingSubmissionId != null) {
+                    _uiState.value = _uiState.value.copy(playingSubmissionId = null)
+                }
+            }
+        }
     }
 
     fun startVoiceRecording() {
@@ -155,6 +162,7 @@ class PeerReviewArenaViewModel @Inject constructor(
     override fun onCleared() {
         recordingTimerJob?.cancel()
         voiceClipRecorder.cancelRecording()
+        audioController.stop()
         super.onCleared()
     }
 

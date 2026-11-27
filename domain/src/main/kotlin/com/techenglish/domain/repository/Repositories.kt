@@ -108,6 +108,19 @@ interface SettingsRepository {
     suspend fun setAgeVerified16Plus(verified: Boolean) = Unit
     suspend fun setAllowFriendPings(allowed: Boolean) = Unit
     suspend fun setAiConsentAccepted(accepted: Boolean) = Unit
+    suspend fun setInitialSetupCompleted(completed: Boolean) = Unit
+    suspend fun setLocalUsername(username: String) = Unit
+    suspend fun setDeveloperRole(role: String) = Unit
+    suspend fun setPendingProfileSync(pending: Boolean) = Unit
+    suspend fun completeInitialSetup(
+        localUsername: String,
+        displayName: String,
+        developerRole: String,
+        dailyGoal: Int,
+        translationLanguage: TranslationLanguage,
+        themeMode: ThemeMode,
+        pendingProfileSync: Boolean
+    ) = Unit
 }
 
 interface CustomDocRepository {

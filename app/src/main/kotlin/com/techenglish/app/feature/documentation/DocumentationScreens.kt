@@ -3,12 +3,14 @@ package com.techenglish.app.feature.documentation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -86,6 +88,7 @@ import com.techenglish.app.core.designsystem.TermDisplayTextStyle
 import com.techenglish.app.core.designsystem.TerminalSearchField
 import com.techenglish.app.core.designsystem.TranslationContainerCard
 import com.techenglish.app.core.designsystem.TtsVoiceStatusBanner
+import com.techenglish.app.core.designsystem.navigationBarContentPadding
 import com.techenglish.app.core.designsystem.rememberTechHaptics
 import com.techenglish.domain.model.ChameleonThemeType
 import com.techenglish.domain.model.DocArticle
@@ -102,6 +105,7 @@ fun DocumentationListScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
                 title = { Text("Техническая документация") },
@@ -122,24 +126,29 @@ fun DocumentationListScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(16.dp),
+            contentPadding = navigationBarContentPadding(horizontal = 0.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
                 TerminalSearchField(
                     value = state.query,
                     onValueChange = viewModel::onQueryChange,
-                    placeholderText = "Поиск по статьям и логам ошибок..."
+                    placeholderText = "Поиск по статьям и логам ошибок...",
+                    modifier = Modifier.padding(horizontal = 16.dp)
                 )
             }
 
             item {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     items(viewModel.techTags) { tag ->
                         FilterChip(
                             selected = state.selectedTag == tag,
                             onClick = { viewModel.onTagToggle(tag) },
-                            label = { Text(tag) }
+                            label = { Text(tag, maxLines = 1, softWrap = false) }
                         )
                     }
                 }
@@ -149,12 +158,15 @@ fun DocumentationListScreen(
                 item {
                     EmptyStateView(
                         title = "Статьи не найдены",
-                        subtitle = "Попробуйте выбрать другую категорию или очистить поиск."
+                        subtitle = "Попробуйте выбрать другую категорию или очистить поиск.",
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
             } else {
                 items(state.articles, key = { it.id }) { article ->
-                    DocArticleCard(article = article, onClick = { onOpenArticle(article.id) })
+                    Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                        DocArticleCard(article = article, onClick = { onOpenArticle(article.id) })
+                    }
                 }
             }
         }
@@ -236,19 +248,25 @@ fun DocReaderScreen(
         viewModel.events.collect { snackbarHostState.showSnackbar(it) }
     }
 
-    // Track scroll reading progress persistently in Room
-    LaunchedEffect(scrollState) {
+    // Track scroll reading progress persistently in Room only once loaded
+    LaunchedEffect(scrollState, state.isLoading, state.article?.id) {
+        if (state.isLoading || state.article == null) return@LaunchedEffect
+        var lastSavedProgress = 0f
         snapshotFlow {
-            if (scrollState.maxValue <= 0) 0.5f
+            if (scrollState.maxValue <= 0) 0f
             else (scrollState.value.toFloat() / scrollState.maxValue.toFloat()).coerceIn(0f, 1f)
         }
             .distinctUntilChanged()
             .collect { progress ->
-                if (progress > 0.1f) viewModel.onScrollProgress(progress)
+                if (progress > 0.1f && (progress - lastSavedProgress >= 0.05f || progress >= 0.98f)) {
+                    lastSavedProgress = progress
+                    viewModel.onScrollProgress(progress)
+                }
             }
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
@@ -329,7 +347,7 @@ fun DocReaderScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(scrollState)
-                .padding(16.dp),
+                .padding(navigationBarContentPadding()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -460,7 +478,7 @@ fun DocReaderScreen(
             ) {
                 Icon(Icons.Rounded.CheckCircle, contentDescription = null)
                 Spacer(Modifier.width(8.dp))
-                Text(if (article.isCompleted) "Статья прочитана ✓" else "Отметить прочитанным (+15 XP)")
+                Text(if (article.isCompleted) "Статья прочитана" else "Отметить прочитанным (+15 XP)")
             }
             Spacer(Modifier.height(16.dp))
         }
