@@ -33,3 +33,4 @@ TechEnglish_Source_Clean.zip
 content_pack/src/main/assets/
 *.db
 content_pack/src/main/assets/databases/tech_english.db
+bin/
